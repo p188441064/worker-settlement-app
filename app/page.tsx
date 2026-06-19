@@ -37,6 +37,10 @@ function canAccessMenu(data: AppData, viewKey: ViewKey) {
 const today = "2026-06-19";
 const currentMonth = monthKey(new Date());
 
+function dateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 const emptyWorker: Worker = {
   id: "",
   workerCode: "",
@@ -370,9 +374,56 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
     .filter((item) => item.balance > 0)
     .sort((a, b) => b.balance - a.balance)
     .slice(0, 5);
+  const alertWindowEnd = dateKey(closingWindowEnd);
+  const paymentAlertRows = paymentDueRows.filter((row) => row.expectedPaymentDate <= alertWindowEnd);
+  const operationAlerts = [
+    {
+      title: "결제예정일 알림",
+      count: paymentAlertRows.length,
+      tone: paymentAlertRows.length > 0 ? "amber" : "mint",
+      summary: paymentAlertRows.length > 0 ? `${paymentAlertRows.length}건 / ${formatWon(paymentAlertRows.reduce((sum, row) => sum + row.balanceAmount, 0))}` : "7일 내 결제예정 없음",
+      detail: paymentAlertRows[0] ? `${paymentAlertRows[0].clientName} · ${paymentAlertRows[0].expectedPaymentDate}` : "입금 예정 항목이 안정적입니다."
+    },
+    {
+      title: "마감예정일 알림",
+      count: closingDueSites.length,
+      tone: closingDueSites.length > 0 ? "amber" : "mint",
+      summary: closingDueSites.length > 0 ? `7일 내 ${closingDueSites.length}건` : "7일 내 마감 없음",
+      detail: closingDueSites[0] ? `${closingDueSites[0].site.siteName || closingDueSites[0].site.name} · ${closingDueSites[0].closingDate}` : "마감 예정 현장이 없습니다."
+    },
+    {
+      title: "서류 미비 알림",
+      count: missingDocumentWorkers.length,
+      tone: missingDocumentWorkers.length > 0 ? "amber" : "mint",
+      summary: missingDocumentWorkers.length > 0 ? `${missingDocumentWorkers.length}명 확인 필요` : "서류 미비 없음",
+      detail: missingDocumentWorkers[0] ? `${missingDocumentWorkers[0].name} 외 ${Math.max(missingDocumentWorkers.length - 1, 0)}명` : "필수 서류 상태가 안정적입니다."
+    },
+    {
+      title: "미수금 연체 알림",
+      count: overdueRows.length,
+      tone: overdueRows.length > 0 ? "rose" : "mint",
+      summary: overdueRows.length > 0 ? `${overdueRows.length}건 / ${formatWon(overdueRows.reduce((sum, row) => sum + row.balanceAmount, 0))}` : "연체 미수금 없음",
+      detail: overdueRows[0] ? `${overdueRows[0].clientName} · ${overdueRows[0].overdueDays}일 연체` : "연체 항목이 없습니다."
+    }
+  ] as const;
 
   return (
     <>
+      <Panel title="운영 알림">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {operationAlerts.map((alert) => (
+            <article key={alert.title} className="rounded-md border border-navy-100 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-sm font-black text-navy-900">{alert.title}</h3>
+                <Badge tone={alert.tone}>{alert.count > 0 ? "확인필요" : "정상"}</Badge>
+              </div>
+              <p className="mt-3 text-lg font-black text-navy-900">{alert.summary}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{alert.detail}</p>
+            </article>
+          ))}
+        </div>
+      </Panel>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="오늘 요청인원" value={`${todayRequestedCount}명`} />
         <StatCard label="오늘 배치인원" value={`${todayAssignedCount}명`} tone="mint" />

@@ -276,7 +276,7 @@ export default function Home() {
               className="hidden"
               id="json-import"
             />
-            <label htmlFor="json-import" className="flex h-10 cursor-pointer items-center rounded-md border border-navy-100 bg-white px-3 text-sm font-semibold text-navy-800 hover:bg-navy-50">
+            <label htmlFor="json-import" className="flex min-h-11 cursor-pointer items-center rounded-md border border-navy-100 bg-white px-4 py-2 text-sm font-semibold text-navy-800 hover:bg-navy-50 sm:min-h-10 sm:px-3">
               JSON 불러오기
             </label>
             <Button variant="secondary" onClick={downloadJson}>JSON 백업</Button>
@@ -366,7 +366,7 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
 
   return (
     <>
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="오늘 요청인원" value={`${todayRequestedCount}명`} />
         <StatCard label="오늘 배치인원" value={`${todayAssignedCount}명`} tone="mint" />
         <StatCard label="부족인원" value={`${shortageToday}명`} />
@@ -377,7 +377,7 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
         <StatCard label="월 부족인원" value={`${monthShortageCount}명`} />
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="월 요청인원" value={`${monthRequestedCount}명`} />
         <StatCard label="월 배치인원" value={`${monthAssignedCount}명`} tone="mint" />
         <StatCard label="월 청구금액" value={formatWon(totalClaim)} />
@@ -425,7 +425,7 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
       </Panel>
 
       <Panel title="최근 배치/정산 현황">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <DataTable>
             <table className="w-full border-collapse">
               <thead><tr>{["근무일", "거래처", "현장", "근로자", "지급액"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
@@ -559,7 +559,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
   };
 
   return (
-    <div className="grid grid-cols-[360px_1fr] gap-5">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
       <Panel title={editing ? "근로자 수정" : "근로자 신규 등록"}>
         <div className="grid gap-3">
           <Field label="근로자코드"><TextInput value={form.workerCode || "자동생성"} onChange={(e) => updateWorkerForm({ ...form, workerCode: e.target.value })} /></Field>
@@ -610,7 +610,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
         </Panel>
       )}
 
-      <Panel title="근로자 목록" actions={<div className="flex items-center gap-2"><label className="text-sm"><input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} /> 서류누락</label><TextInput placeholder="코드, 이름, 휴대폰, 주소 검색" value={query} onChange={(e) => setQuery(e.target.value)} className="w-72" /></div>}>
+      <Panel title="근로자 목록" actions={<div className="flex items-center gap-2"><label className="text-sm"><input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} /> 서류누락</label><TextInput placeholder="코드, 이름, 휴대폰, 주소 검색" value={query} onChange={(e) => setQuery(e.target.value)} className="w-full sm:w-72" /></div>}>
         <DataTable>
           <table className="w-full border-collapse">
             <thead><tr><th className={th}>근로자코드</th><th className={th}>성명</th><th className={th}>생년월일</th><th className={th}>나이</th><th className={th}>60세 여부</th><th className={th}>휴대폰</th><th className={th}>직종</th><th className={th}>등록일</th><th className={th}>서류상태</th><th className={th}>최근출역일</th><th className={th}>관리</th></tr></thead>
@@ -817,7 +817,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
   };
 
   return (
-    <div className="grid grid-cols-[360px_1fr] gap-5">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
       <Panel title="거래처 · 현장 트리">
         <div className="grid gap-3">
           <div className="flex gap-2">
@@ -828,7 +828,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
             <Button variant="secondary" onClick={startNewClient}>거래처 신규</Button>
             <Button variant="secondary" onClick={startNewSite} disabled={!clientForm.id}>현장 신규</Button>
           </div>
-          <div className="h-[700px] overflow-y-auto rounded-md border border-navy-100 bg-white">
+          <div className="max-h-[70vh] overflow-y-auto rounded-md border border-navy-100 bg-white xl:h-[700px]">
             {treeClients.map(({ client, sites }) => {
               const clientActive = selectedClientId === client.id;
               return (
@@ -857,7 +857,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
 
       <div className="space-y-5">
         <Panel title="거래처 상세정보" actions={<div className="flex gap-2"><Button onClick={saveClient}>{clientForm.id ? "거래처 수정" : "거래처 저장"}</Button><Button variant="danger" onClick={deleteClient} disabled={!clientForm.id}>거래처 삭제</Button></div>}>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Field label="거래처명"><TextInput value={clientForm.name} onChange={(e) => setClientField("name", e.target.value)} /></Field>
             <Field label="담당자명"><TextInput value={clientForm.managerName} onChange={(e) => setClientField("managerName", e.target.value)} /></Field>
             <Field label="회사전화번호"><TextInput value={clientForm.phone} onChange={(e) => setClientField("phone", e.target.value)} /></Field>
@@ -872,7 +872,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
 
         <Panel title="현장 상세정보" actions={<div className="flex gap-2"><Button variant="secondary" onClick={startNewSite} disabled={!clientForm.id}>현장 신규</Button><Button onClick={saveSite} disabled={!clientForm.id}>{siteForm.id ? "현장 수정" : "현장 저장"}</Button><Button variant="danger" onClick={deleteSite} disabled={!siteForm.id}>현장 삭제</Button></div>}>
           {clientForm.id ? (
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Field label="소속 거래처"><TextInput value={clientForm.name} readOnly /></Field>
               <Field label="현장코드"><TextInput value={siteForm.siteCode} onChange={(e) => setSiteField("siteCode", e.target.value)} /></Field>
               <Field label="현장명"><TextInput value={siteForm.siteName} onChange={(e) => setSiteField("siteName", e.target.value)} /></Field>
@@ -884,7 +884,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
               <Field label="담당자 연락처"><TextInput value={siteForm.managerPhone} onChange={(e) => setSiteField("managerPhone", e.target.value)} /></Field>
               <Field label="이메일1"><TextInput value={siteForm.settlementEmail1} onChange={(e) => setSiteField("settlementEmail1", e.target.value)} /></Field>
               <Field label="이메일2"><TextInput value={siteForm.settlementEmail2} onChange={(e) => setSiteField("settlementEmail2", e.target.value)} /></Field>
-              <div className="grid grid-cols-2 gap-2"><Field label="마감일"><TextInput type="number" value={siteForm.closingDay} onChange={(e) => setSiteField("closingDay", Number(e.target.value))} /></Field><Field label="결제일"><TextInput type="number" value={siteForm.paymentDay} onChange={(e) => setSiteField("paymentDay", Number(e.target.value))} /></Field></div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2"><Field label="마감일"><TextInput type="number" value={siteForm.closingDay} onChange={(e) => setSiteField("closingDay", Number(e.target.value))} /></Field><Field label="결제일"><TextInput type="number" value={siteForm.paymentDay} onChange={(e) => setSiteField("paymentDay", Number(e.target.value))} /></Field></div>
               <Field label="기본단가"><TextInput type="number" value={siteForm.defaultUnitPrice} onChange={(e) => setSiteField("defaultUnitPrice", Number(e.target.value))} /></Field>
               <Field label="기본공제유형"><DeductionSelect value={siteForm.defaultDeductionType} onChange={(value) => setSiteField("defaultDeductionType", value)} /></Field>
               <Field label="계산서 발행 여부"><SelectInput value={siteForm.invoiceIssueType} onChange={(e) => setSiteField("invoiceIssueType", e.target.value as Site["invoiceIssueType"])}><option value="ISSUED">계산서 발행</option><option value="NOT_ISSUED">계산서 미발행</option></SelectInput></Field>
@@ -1123,7 +1123,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
   return (
     <div className="space-y-5">
       <Panel title="요청건 등록">
-        <div className="grid grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <Field label="근무일"><TextInput type="date" value={requestForm.workDate} onChange={(e) => setRequestForm({ ...requestForm, workDate: e.target.value })} /></Field>
           <Field label="거래처"><SelectInput value={requestForm.clientId} onChange={(e) => changeRequestClient(e.target.value)}>{data.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</SelectInput></Field>
           <Field label="현장"><SelectInput value={requestForm.siteId} onChange={(e) => changeRequestSite(e.target.value)}>{requestSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</SelectInput></Field>
@@ -1148,7 +1148,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
 
       <Panel title="근로자 배치">
         {selectedRequest ? (
-          <div className="grid grid-cols-[380px_1fr] gap-5">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[380px_1fr]">
             <div className="rounded-md border border-navy-100 bg-navy-50 p-4 text-sm">
               <p className="text-lg font-bold text-navy-900">{data.clients.find((client) => client.id === selectedRequest.clientId)?.name} / {data.sites.find((site) => site.id === selectedRequest.siteId)?.name}</p>
               <p className="mt-2">근무일: {selectedRequest.workDate}</p>
@@ -1159,7 +1159,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
               <div className="mt-3 flex flex-wrap gap-2"><StatusBadge status={getRequestStatus(selectedRequest, data.assignments)} /><Badge tone={selectedShortageCount > 0 ? "amber" : "mint"}>{selectedShortageCount > 0 ? `부족 ${selectedShortageCount}명` : "부족 없음"}</Badge></div>
             </div>
             <div className="grid gap-4">
-              <div className="grid grid-cols-6 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
                 <Field label="근로자 검색"><TextInput value={workerQuery} onChange={(e) => setWorkerQuery(e.target.value)} placeholder="이름 또는 연락처" /></Field>
                 <Field label="근로자 선택"><SelectInput value={assignmentForm.workerId} onChange={(e) => setAssignmentForm({ ...assignmentForm, workerId: e.target.value })}><option value="">선택</option>{availableWorkers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name} ({worker.mobile || worker.phone})</option>)}</SelectInput></Field>
                 <Field label="공수"><TextInput type="number" step="0.5" value={assignmentForm.workCount} onChange={(e) => setAssignmentForm({ ...assignmentForm, workCount: Number(e.target.value) })} /></Field>
@@ -1167,7 +1167,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
                 <Field label="공제유형"><DeductionSelect value={assignmentForm.deductionType} onChange={(value) => setAssignmentForm({ ...assignmentForm, deductionType: value })} /></Field>
                 <div className="flex items-end"><Button onClick={saveAssignment} className="w-full">배치 저장</Button></div>
               </div>
-              <div className="grid grid-cols-6 gap-3 rounded-md border border-navy-100 bg-white p-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6 rounded-md border border-navy-100 bg-white p-3">
                 <Field label="실제 배치인원"><TextInput type="number" min={1} value={bulkAssignCount} onChange={(e) => setBulkAssignCount(Number(e.target.value))} /></Field>
                 <Field label="현재 배치인원"><TextInput value={`${selectedAssignedCount}명`} readOnly /></Field>
                 <Field label="부족인원"><TextInput value={`${selectedShortageCount}명`} readOnly /></Field>
@@ -1194,7 +1194,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
                 {"healthInsuranceReason" in preview && <p><b>건강보험</b> {preview.healthInsuranceReason}</p>}
                 {"pensionReason" in preview && <p><b>국민연금</b> {preview.pensionReason}</p>}
               </div>
-              <div className="grid grid-cols-7 gap-2 rounded-md border border-navy-100 bg-white p-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-7 rounded-md border border-navy-100 bg-white p-3">
                 <Field label="수동 고용"><TextInput type="number" value={assignmentForm.manualEmploymentInsurance} onChange={(e) => setAssignmentForm({ ...assignmentForm, manualEmploymentInsurance: e.target.value })} /></Field>
                 <Field label="수동 건강"><TextInput type="number" value={assignmentForm.manualHealthInsurance} onChange={(e) => setAssignmentForm({ ...assignmentForm, manualHealthInsurance: e.target.value })} /></Field>
                 <Field label="수동 연금"><TextInput type="number" value={assignmentForm.manualNationalPension} onChange={(e) => setAssignmentForm({ ...assignmentForm, manualNationalPension: e.target.value })} /></Field>
@@ -1280,7 +1280,7 @@ function SettlementView({ data, selectedMonth, setSelectedMonth }: { data: AppDa
   return (
     <div className="space-y-5">
       <Panel title="정산 조건">
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Field label="정산월"><TextInput type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} /></Field>
           <Field label="거래처"><SelectInput value={clientId} onChange={(e) => { setClientId(e.target.value); setSiteId("all"); }}>{data.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</SelectInput></Field>
           <Field label="현장"><SelectInput value={siteId} onChange={(e) => setSiteId(e.target.value)}><option value="all">전체 현장</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</SelectInput></Field>
@@ -1293,7 +1293,7 @@ function SettlementView({ data, selectedMonth, setSelectedMonth }: { data: AppDa
         </div>
       </Panel>
 
-      <div className="grid grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard label="총 인원" value={`${workerCount}명`} />
         <StatCard label="총 공수" value={`${totalWorkCount}`} />
         <StatCard label="총 노무비" value={formatWon(totalLabor)} tone="mint" />
@@ -1526,7 +1526,7 @@ function ReceiptDocuments({ data, entries, site, selectedMonth }: { data: AppDat
         </tbody></table>
         <p className="mb-8 text-sm leading-7">상기 금액을 해당 기간 동안의 일용노무비로 정히 수령하였음을 확인합니다.</p>
         <div className="flex items-end justify-end gap-6"><span>수령인: {worker?.name}</span>{worker?.signatureDataUrl && <img src={worker.signatureDataUrl} alt="서명" className="h-20 w-28 object-contain" />}</div>
-        <div className="mt-6 grid grid-cols-2 gap-3"><DocumentImage title="신분증 앞면" value={worker?.idCardFrontImage} /><DocumentImage title="신분증 뒷면" value={worker?.idCardBackImage} /></div>
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2"><DocumentImage title="신분증 앞면" value={worker?.idCardFrontImage} /><DocumentImage title="신분증 뒷면" value={worker?.idCardBackImage} /></div>
       </PrintPage>
     );
   })}</>;
@@ -1546,7 +1546,7 @@ function WorkerProfileDocuments({ data, entries }: { data: AppData; entries: Wor
           <tr><th className={printTh}>직종</th><td className={printTd}>{worker.jobType}</td><th className={printTh}>경력</th><td className={printTd}>{worker.career}</td></tr>
           <tr><th className={printTh}>자격증</th><td className={printTd}>{worker.certifications}</td><th className={printTh}>서류상태</th><td className={printTd}>{getDocumentStatusLabel(worker)}</td></tr>
         </tbody></table>
-        <div className="grid grid-cols-3 gap-3"><DocumentImage title="신분증 앞면" value={worker.idCardFrontImage} /><DocumentImage title="신분증 뒷면" value={worker.idCardBackImage} /><DocumentImage title="이수증" value={worker.safetyCertificateImage} /></div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><DocumentImage title="신분증 앞면" value={worker.idCardFrontImage} /><DocumentImage title="신분증 뒷면" value={worker.idCardBackImage} /><DocumentImage title="이수증" value={worker.safetyCertificateImage} /></div>
         <div className="mt-6 flex items-end justify-end gap-4"><span>신청인: {worker.name}</span>{worker.signatureDataUrl && <img src={worker.signatureDataUrl} alt="서명/도장" className="h-20 w-28 object-contain" />}</div>
       </PrintPage>
     );
@@ -1671,7 +1671,7 @@ function ReceivablesView({
   return (
     <div className="space-y-5">
       <Panel title="미수금 조회 조건">
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Field label="마감월"><TextInput type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} /></Field>
           <Field label="거래처"><SelectInput value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}><option value="all">전체 거래처</option>{data.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</SelectInput></Field>
           <Field label="거래처 검색"><TextInput value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} /></Field>
@@ -1680,7 +1680,7 @@ function ReceivablesView({
         </div>
       </Panel>
 
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard label="전체 청구금액" value={formatWon(totalClaim)} />
         <StatCard label="전체 입금금액" value={formatWon(totalPaid)} tone="mint" />
         <StatCard label="전체 미수금" value={formatWon(totalReceivable)} />
@@ -1738,7 +1738,7 @@ function ReceivablesView({
       </Panel>
 
       <Panel title="입금 및 결제예정일 관리">
-        <div className="grid grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <Field label="선택 현장"><TextInput value={selectedRow ? `${selectedRow.clientName} / ${selectedRow.siteName}` : ""} readOnly /></Field>
           <Field label="미수금액"><TextInput value={selectedRow ? formatWon(selectedRow.balanceAmount) : ""} readOnly /></Field>
           <Field label="결제예정일"><TextInput value={selectedRow?.expectedPaymentDate ?? ""} readOnly /></Field>
@@ -1824,7 +1824,7 @@ function WorkerJournalView({ data }: { data: AppData }) {
   return (
     <div className="space-y-5">
       <Panel title="근로자 개인일지 조회조건">
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Field label="근로자 선택">
             <SelectInput value={workerId} onChange={(event) => { setWorkerId(event.target.value); setSiteId("all"); }}>
               {data.workers.map((item) => <option key={item.id} value={item.id}>{item.workerCode} {item.name}</option>)}
@@ -1845,7 +1845,7 @@ function WorkerJournalView({ data }: { data: AppData }) {
         </div>
       </Panel>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="근무일수" value={`${workDays}일`} />
         <StatCard label="총 노무비" value={formatWon(totalLabor)} tone="mint" />
         <StatCard label="총 공제액" value={formatWon(totalDeduction)} />
@@ -1905,7 +1905,7 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
   return (
     <div className="space-y-5">
       <Panel title="회사 기본정보 관리">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="업체명"><TextInput value={data.companyInfo.companyName} onChange={(event) => updateCompanyInfo("companyName", event.target.value)} /></Field>
           <Field label="사업자번호"><TextInput value={data.companyInfo.businessNumber} onChange={(event) => updateCompanyInfo("businessNumber", event.target.value)} /></Field>
           <Field label="대표자"><TextInput value={data.companyInfo.companyRepresentative} onChange={(event) => updateCompanyInfo("companyRepresentative", event.target.value)} /></Field>
@@ -1916,7 +1916,7 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
       </Panel>
 
       <Panel title="역할 및 메뉴 접근 권한">
-        <div className="mb-3 grid grid-cols-3 gap-3 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900">
+        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900">
           <span>현재 역할: {roleLabels[accessControl.currentRole]}</span>
           <span>관리자: 전체 업무 권한 기준</span>
           <span>일반사용자: 체크된 메뉴만 표시</span>
@@ -1995,7 +1995,7 @@ function RulesView({ data, updateData }: { data: AppData; updateData: (data: App
   };
 
   return (
-    <div className="grid grid-cols-[420px_1fr] gap-5">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[420px_1fr]">
       <Panel title={form.id ? "계산기준 수정" : "계산기준 등록"}>
         <div className="grid gap-3">
           <Field label="공제유형"><DeductionSelect value={form.deductionType} onChange={(value) => resetByFormula({ deductionType: value })} /></Field>
@@ -2008,7 +2008,7 @@ function RulesView({ data, updateData }: { data: AppData; updateData: (data: App
           </Field>
           <Field label="단가"><TextInput type="number" value={form.unitPrice} onChange={(e) => resetByFormula({ unitPrice: Number(e.target.value) })} /></Field>
           <Field label="알선수수료율"><TextInput type="number" step="0.01" value={form.brokerageFeeRate ?? 0.1} onChange={(e) => resetByFormula({ brokerageFeeRate: Number(e.target.value) })} /></Field>
-          <div className="grid grid-cols-2 gap-2 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900">
             <span>알선수수료 {formatWon(form.brokerageFee)}</span>
             <span>근로자 기준금액 {formatWon(form.workerBaseAmount)}</span>
           </div>
@@ -2018,7 +2018,7 @@ function RulesView({ data, updateData }: { data: AppData; updateData: (data: App
               <option value="ISSUED">전자계산서(면세) 발행</option>
             </SelectInput>
           </Field>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <Field label="고용공제"><TextInput type="number" value={form.employmentInsurance} onChange={(e) => setMoney("employmentInsurance", Number(e.target.value))} /></Field>
             <Field label="건강보험"><TextInput type="number" value={form.healthInsurance} onChange={(e) => setMoney("healthInsurance", Number(e.target.value))} /></Field>
             <Field label="국민연금"><TextInput type="number" value={form.nationalPension} onChange={(e) => setMoney("nationalPension", Number(e.target.value))} /></Field>
@@ -2212,7 +2212,7 @@ function WorkerFileField({
           type="file"
           accept="image/*"
           onChange={(event) => onChange(event.target.files?.[0])}
-          className="w-44 text-xs"
+          className="w-full text-xs sm:w-44"
         />
       </div>
       {value ? (
@@ -2251,7 +2251,7 @@ function WorkerApplicationPreview({ worker }: { worker: Worker }) {
           ))}
         </tbody>
       </table>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <DocumentImage title="신분증 앞면" value={worker.idCardFrontImage} />
         <DocumentImage title="신분증 뒷면" value={worker.idCardBackImage} />
         <DocumentImage title="이수증" value={worker.safetyCertificateImage} />

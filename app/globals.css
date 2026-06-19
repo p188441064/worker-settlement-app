@@ -112,3 +112,22 @@ body {
     min-height: auto !important;
   }
 }
+
+@media screen and (max-width: 900px) {
+  .print-area {
+    overflow-x: auto;
+    padding-bottom: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .print-paper {
+    margin-left: 0;
+    margin-right: 0;
+    transform: scale(0.72);
+    transform-origin: top left;
+  }
+
+  .print-landscape {
+    transform: scale(0.5);
+  }
+}

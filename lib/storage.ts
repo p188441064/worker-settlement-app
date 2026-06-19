@@ -5,6 +5,7 @@ import { SCHEMA_VERSION, sampleData } from "./sample-data";
 import { ceilWon, getWorkerBaseAmount, normalizeRequestStatuses } from "./calculations";
 import { calculatePayrollDeduction } from "./payrollRules";
 import { createLocalStorageService } from "./storageService";
+import { createDefaultCloudSyncConfig, createDefaultCloudUser } from "./cloudSync";
 
 export const STORAGE_KEY = "worker-settlement-app-data-v1";
 export const storageService = createLocalStorageService(STORAGE_KEY, SCHEMA_VERSION);
@@ -287,11 +288,18 @@ function migrateCompanyInfo(companyInfo: Partial<AppData["companyInfo"]> | undef
   };
 }
 
+function migrateCloudSync(cloudSync: Partial<AppData["cloudSync"]> | undefined): AppData["cloudSync"] {
+  return {
+    ...createDefaultCloudSyncConfig(),
+    ...(cloudSync || {})
+  };
+}
 function migrateAccessControl(accessControl: Partial<AppData["accessControl"]> | undefined): AppData["accessControl"] {
   const samplePermissions = sampleData.accessControl.menuPermissions;
   const incoming = accessControl?.menuPermissions || [];
   return {
     currentRole: accessControl?.currentRole || "ADMIN",
+    currentUser: accessControl?.currentUser || createDefaultCloudUser(accessControl?.currentRole || "ADMIN"),
     sensitiveProtectionEnabled: accessControl?.sensitiveProtectionEnabled ?? sampleData.accessControl.sensitiveProtectionEnabled ?? false,
     menuPermissions: samplePermissions.map((permission) => ({
       ...permission,
@@ -319,6 +327,7 @@ export function migrateAppData(partial: Partial<AppData>): AppData {
     calculationRules,
     companyInfo: migrateCompanyInfo(partial.companyInfo),
     accessControl: migrateAccessControl(partial.accessControl),
+    cloudSync: migrateCloudSync(partial.cloudSync),
     receivablePayments: partial.receivablePayments || []
   };
   if (!data.workRequests.length && !data.assignments.length && data.workEntries.length) {

@@ -162,6 +162,14 @@ export const sampleData: AppData = {
   },
   accessControl: {
     currentRole: "ADMIN",
+    currentUser: {
+      id: "local-admin",
+      email: "local-admin@example.local",
+      name: "Local Admin",
+      role: "ADMIN",
+      organizationId: "local-org",
+      lastLoginAt: ""
+    },
     sensitiveProtectionEnabled: false,
     menuPermissions: [
       { viewKey: "dashboard", admin: true, user: true, sensitive: false },
@@ -176,6 +184,14 @@ export const sampleData: AppData = {
       { viewKey: "checklist", admin: true, user: true, sensitive: false },
       { viewKey: "help", admin: true, user: true, sensitive: false }
     ]
+  },
+  cloudSync: {
+    mode: "LOCAL_ONLY",
+    status: "IDLE",
+    lastSyncedAt: "",
+    lastError: "",
+    storageProvider: "localStorage",
+    attachmentProvider: "localStorage"
   },
   receivablePayments: [
     { id: "rp-001", clientId: "c-001", siteId: "s-001", closingMonth: "2026-06", amount: 300000, paymentDate: "2026-06-20", memo: "샘플 부분입금" }

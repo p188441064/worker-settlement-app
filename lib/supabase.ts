@@ -74,3 +74,24 @@ export async function deleteSupabaseStorageObject(path: string, config = getSupa
   if (!response.ok) throw new Error(`Supabase delete failed: ${response.status}`);
   return true;
 }
+
+export interface SupabaseAppConfig extends SupabaseStorageConfig {
+  organizationId: string;
+  dataMode: "local" | "supabase";
+  workerDocumentsBucket: string;
+}
+
+export function getSupabaseAppConfig(): SupabaseAppConfig | undefined {
+  const storage = getSupabaseStorageConfig();
+  if (!storage) return undefined;
+  return {
+    ...storage,
+    organizationId: process.env.NEXT_PUBLIC_SUPABASE_ORG_ID || "local-org",
+    dataMode: process.env.NEXT_PUBLIC_DATA_STORAGE_MODE === "supabase" ? "supabase" : "local",
+    workerDocumentsBucket: storage.bucket
+  };
+}
+
+export function isSupabaseConfigured() {
+  return Boolean(getSupabaseAppConfig());
+}

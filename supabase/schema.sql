@@ -147,3 +147,49 @@ create index if not exists idx_documents_worker_id on public.documents(worker_id
 -- alter table public.assignments enable row level security;
 -- alter table public.settlements enable row level security;
 -- alter table public.documents enable row level security;
+
+-- Multi-user and cloud synchronization draft.
+create table if not exists public.organizations (
+  id text primary key,
+  name text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.user_profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  organization_id text not null references public.organizations(id) on delete cascade,
+  email text not null,
+  name text,
+  role text not null default 'USER' check (role in ('ADMIN', 'USER')),
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.workers add column if not exists organization_id text references public.organizations(id) on delete cascade;
+alter table public.workers add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.clients add column if not exists organization_id text references public.organizations(id) on delete cascade;
+alter table public.clients add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.sites add column if not exists organization_id text references public.organizations(id) on delete cascade;
+alter table public.sites add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.assignments add column if not exists organization_id text references public.organizations(id) on delete cascade;
+alter table public.assignments add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.settlements add column if not exists organization_id text references public.organizations(id) on delete cascade;
+alter table public.settlements add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.documents add column if not exists organization_id text references public.organizations(id) on delete cascade;
+alter table public.documents add column if not exists created_by uuid references auth.users(id) on delete set null;
+
+create table if not exists public.sync_events (
+  id text primary key default gen_random_uuid()::text,
+  organization_id text not null references public.organizations(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete set null,
+  source text not null default 'web',
+  event_type text not null,
+  status text not null default 'SUCCESS',
+  message text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_user_profiles_org on public.user_profiles(organization_id);
+create index if not exists idx_sync_events_org_created on public.sync_events(organization_id, created_at desc);

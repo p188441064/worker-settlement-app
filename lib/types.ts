@@ -225,6 +225,26 @@ export interface CalculationRule {
 }
 
 export type UserRole = "ADMIN" | "USER";
+export type CloudSyncMode = "LOCAL_ONLY" | "SUPABASE_READY" | "SUPABASE_ACTIVE";
+export type CloudSyncStatus = "IDLE" | "SYNCING" | "SUCCESS" | "ERROR";
+
+export interface CloudUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  organizationId: string;
+  lastLoginAt: string;
+}
+
+export interface CloudSyncConfig {
+  mode: CloudSyncMode;
+  status: CloudSyncStatus;
+  lastSyncedAt: string;
+  lastError: string;
+  storageProvider: "localStorage" | "supabase";
+  attachmentProvider: "localStorage" | "supabaseStorage";
+}
 
 export interface MenuPermission {
   viewKey: ViewKey;
@@ -235,6 +255,7 @@ export interface MenuPermission {
 
 export interface AccessControl {
   currentRole: UserRole;
+  currentUser: CloudUser;
   menuPermissions: MenuPermission[];
   sensitiveProtectionEnabled?: boolean;
 }
@@ -269,6 +290,7 @@ export interface AppData {
   calculationRules: CalculationRule[];
   companyInfo: CompanyInfo;
   accessControl: AccessControl;
+  cloudSync: CloudSyncConfig;
   receivablePayments: ReceivablePayment[];
 }
 

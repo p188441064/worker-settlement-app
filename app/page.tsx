@@ -1119,15 +1119,6 @@ function ClosingDocumentsPreview({
 const printTh = "border border-slate-400 bg-slate-100 px-2 py-1 text-left font-bold";
 const printTd = "border border-slate-400 px-2 py-1";
 
-function PrintPage({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="print-page mx-auto max-w-5xl bg-white p-8 text-slate-950 shadow-ledger print:mx-0 print:max-w-none print:p-0 print:shadow-none">
-      <h2 className="mb-5 text-center text-2xl font-black tracking-normal">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
 function getWorkerGroups(entries: WorkAssignment[]) {
   const groups = new Map<string, WorkAssignment[]>();
   entries.forEach((entry) => groups.set(entry.workerId, [...(groups.get(entry.workerId) ?? []), entry]));

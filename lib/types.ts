@@ -103,6 +103,10 @@ export interface Site {
   defaultTaskDescription: string;
   isActive: boolean;
   invoiceIssueType: InvoiceIssueType;
+  invoiceStatementIssued: boolean;
+  invoiceStatementIssuedDate: string;
+  taxInvoiceIssued: boolean;
+  taxInvoiceIssuedDate: string;
   invoiceDeductionRate: number;
   deductionOutputBasis: DeductionOutputBasis;
   healthInsuranceBasis: InsuranceBasis;

@@ -103,6 +103,10 @@ const emptySite: Site = {
   defaultUnitPrice: 150000,
   defaultDeductionType: "고용보험",
   invoiceIssueType: "ISSUED",
+  invoiceStatementIssued: false,
+  invoiceStatementIssuedDate: "",
+  taxInvoiceIssued: false,
+  taxInvoiceIssuedDate: "",
   invoiceDeductionRate: 0.1,
   deductionOutputBasis: "MONTH_FIRST_DAY",
   healthInsuranceBasis: "CLIENT_BASED",
@@ -359,6 +363,7 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
   const paymentDueRows = receivableRows.filter((row) => row.balanceAmount > 0 && row.expectedPaymentDate >= today);
   const paymentDueAmount = paymentDueRows.reduce((sum, row) => sum + row.balanceAmount, 0);
   const overdueRows = receivableRows.filter((row) => row.balanceAmount > 0 && row.overdueDays > 0);
+  const unissuedInvoiceRows = receivableRows.filter((row) => row.claimAmount > 0 && (!row.invoiceStatementIssued || !row.taxInvoiceIssued));
   const closingWindowEnd = new Date(`${today}T00:00:00`);
   closingWindowEnd.setDate(closingWindowEnd.getDate() + 7);
   const [closingYear, closingMonth] = selectedMonth.split("-").map(Number);
@@ -453,6 +458,7 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
         <StatCard label="미수금 합계" value={formatWon(totalReceivable)} />
         <StatCard label="결제 예정 금액" value={formatWon(paymentDueAmount)} tone="mint" />
         <StatCard label="마감 예정 현장" value={`${closingDueSites.length}건`} />
+        <StatCard label="미발행 건수" value={`${unissuedInvoiceRows.length}건`} />
         <StatCard label="월 부족인원" value={`${monthShortageCount}명`} />
       </div>
 
@@ -1166,6 +1172,10 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
               <Field label="기본단가"><TextInput type="number" value={siteForm.defaultUnitPrice} onChange={(e) => setSiteField("defaultUnitPrice", Number(e.target.value))} /></Field>
               <Field label="기본공제유형"><DeductionSelect value={siteForm.defaultDeductionType} onChange={(value) => setSiteField("defaultDeductionType", value)} /></Field>
               <Field label="계산서 발행 여부"><SelectInput value={siteForm.invoiceIssueType} onChange={(e) => setSiteField("invoiceIssueType", e.target.value as Site["invoiceIssueType"])}><option value="ISSUED">계산서 발행</option><option value="NOT_ISSUED">계산서 미발행</option></SelectInput></Field>
+              <label className="flex items-center gap-2 rounded-md bg-navy-50 p-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={siteForm.invoiceStatementIssued} onChange={(e) => setSiteField("invoiceStatementIssued", e.target.checked)} />거래명세서 발행완료</label>
+              <Field label="거래명세서 발행일"><TextInput type="date" value={siteForm.invoiceStatementIssuedDate} onChange={(e) => setSiteField("invoiceStatementIssuedDate", e.target.value)} /></Field>
+              <label className="flex items-center gap-2 rounded-md bg-navy-50 p-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={siteForm.taxInvoiceIssued} onChange={(e) => setSiteField("taxInvoiceIssued", e.target.checked)} />세금계산서 발행완료</label>
+              <Field label="세금계산서 발행일"><TextInput type="date" value={siteForm.taxInvoiceIssuedDate} onChange={(e) => setSiteField("taxInvoiceIssuedDate", e.target.value)} /></Field>
               <Field label="알선수수료율"><TextInput type="number" step="0.01" value={siteForm.invoiceDeductionRate} onChange={(e) => setSiteField("invoiceDeductionRate", Number(e.target.value))} /></Field>
               <Field label="건강보험 판단 기준"><SelectInput value={siteForm.healthInsuranceBasis} onChange={(e) => setSiteField("healthInsuranceBasis", e.target.value as Site["healthInsuranceBasis"])}><option value="CLIENT_BASED">거래처 기준</option><option value="SITE_BASED">현장 기준</option><option value="MANUAL">수동</option></SelectInput></Field>
               <Field label="건강보험 출력 기준"><SelectInput value={siteForm.healthInsuranceOutputBasis} onChange={(e) => setSiteField("healthInsuranceOutputBasis", e.target.value as Site["healthInsuranceOutputBasis"])}><option value="MONTH_FIRST_DAY">매월 1일 기준</option><option value="DATE_BASED">실제 날짜 기준</option><option value="FIRST_MONTH_NOT_APPLY">첫달 미부과</option><option value="MANUAL">수동</option></SelectInput></Field>
@@ -1865,6 +1875,7 @@ function ReceivablesView({
   const totalPaid = rows.reduce((sum, row) => sum + row.paidAmount, 0);
   const overdueReceivable = rows.reduce((sum, row) => sum + (row.overdueDays > 0 ? row.balanceAmount : 0), 0);
   const overdueCount = rows.filter((row) => row.balanceAmount > 0 && row.overdueDays > 0).length;
+  const unissuedCount = rows.filter((row) => row.claimAmount > 0 && (!row.invoiceStatementIssued || !row.taxInvoiceIssued)).length;
   const clientTotals = data.clients.map((client) => {
     const clientRows = rows.filter((row) => row.clientId === client.id);
     return {
@@ -1913,6 +1924,14 @@ function ReceivablesView({
     addPayment(selectedRow.balanceAmount, paymentMemo || "완납 처리");
   };
 
+  const updateInvoiceIssue = (patch: Partial<Pick<Site, "invoiceStatementIssued" | "invoiceStatementIssuedDate" | "taxInvoiceIssued" | "taxInvoiceIssuedDate">>) => {
+    if (!selectedRow) return;
+    updateData({
+      ...data,
+      sites: data.sites.map((site) => site.id === selectedRow.siteId ? { ...site, ...patch } : site)
+    });
+  };
+
   const updatePaymentDay = (paymentDay: number) => {
     if (!selectedRow || !selectedSite) return;
     const safeDay = Math.min(Math.max(paymentDay || 1, 1), 31);
@@ -1931,6 +1950,10 @@ function ReceivablesView({
       입금금액: row.paidAmount,
       미수금액: row.balanceAmount,
       계산서발행여부: row.invoiceIssueType === "ISSUED" ? "계산서 발행" : "계산서 미발행",
+      거래명세서상태: row.invoiceStatementIssued ? "발행완료" : "미발행",
+      거래명세서발행일: row.invoiceStatementIssuedDate || "",
+      세금계산서상태: row.taxInvoiceIssued ? "발행완료" : "미발행",
+      세금계산서발행일: row.taxInvoiceIssuedDate || "",
       마감월: row.closingMonth,
       마감일: row.closingDay,
       결제예정일: row.expectedPaymentDate,
@@ -1970,6 +1993,7 @@ function ReceivablesView({
         <StatCard label="전체 미수금" value={formatWon(totalReceivable)} />
         <StatCard label="연체 미수금" value={formatWon(overdueReceivable)} />
         <StatCard label="연체 현장" value={`${overdueCount}건`} />
+        <StatCard label="미발행 건수" value={`${unissuedCount}건`} />
       </div>
 
       <Panel title="거래처별 미수금 합계">
@@ -2015,8 +2039,8 @@ function ReceivablesView({
       <Panel title="전체 미수금 목록">
         <DataTable>
           <table className="w-full border-collapse">
-            <thead><tr>{["거래처명", "현장명", "청구금액", "입금금액", "미수금액", "계산서", "마감월", "마감일", "결제예정일", "연체일수", "입금일", "상태", "비고"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-            <tbody>{rows.map((row) => <tr key={row.key} className={selectedRow?.key === row.key ? "bg-mint-50" : ""}><td className={td}><button className="font-bold text-navy-900" onClick={() => setSelectedKey(row.key)}>{row.clientName}</button></td><td className={td}>{row.siteName}</td><td className={td}>{formatWon(row.claimAmount)}</td><td className={td}>{formatWon(row.paidAmount)}</td><td className={td}>{formatWon(row.balanceAmount)}</td><td className={td}>{row.invoiceIssueType === "ISSUED" ? "발행" : "미발행"}</td><td className={td}>{row.closingMonth}</td><td className={td}>{row.closingDay}</td><td className={td}>{row.expectedPaymentDate}</td><td className={td}>{row.overdueDays > 0 ? `${row.overdueDays}일` : "-"}</td><td className={td}>{row.paymentDates}</td><td className={td}><ReceivableStatusBadge status={row.status} /></td><td className={td}>{row.memo}</td></tr>)}</tbody>
+            <thead><tr>{["거래처명", "현장명", "청구금액", "입금금액", "미수금액", "거래명세서", "거래명세서 발행일", "세금계산서", "세금계산서 발행일", "마감월", "마감일", "결제예정일", "연체일수", "입금일", "상태", "비고"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.key} className={selectedRow?.key === row.key ? "bg-mint-50" : ""}><td className={td}><button className="font-bold text-navy-900" onClick={() => setSelectedKey(row.key)}>{row.clientName}</button></td><td className={td}>{row.siteName}</td><td className={td}>{formatWon(row.claimAmount)}</td><td className={td}>{formatWon(row.paidAmount)}</td><td className={td}>{formatWon(row.balanceAmount)}</td><td className={td}><Badge tone={row.invoiceStatementIssued ? "mint" : "rose"}>{row.invoiceStatementIssued ? "발행완료" : "미발행"}</Badge></td><td className={td}>{row.invoiceStatementIssuedDate || "-"}</td><td className={td}><Badge tone={row.taxInvoiceIssued ? "mint" : "rose"}>{row.taxInvoiceIssued ? "발행완료" : "미발행"}</Badge></td><td className={td}>{row.taxInvoiceIssuedDate || "-"}</td><td className={td}>{row.closingMonth}</td><td className={td}>{row.closingDay}</td><td className={td}>{row.expectedPaymentDate}</td><td className={td}>{row.overdueDays > 0 ? `${row.overdueDays}일` : "-"}</td><td className={td}>{row.paymentDates}</td><td className={td}><ReceivableStatusBadge status={row.status} /></td><td className={td}>{row.memo}</td></tr>)}</tbody>
           </table>
         </DataTable>
       </Panel>
@@ -2027,6 +2051,10 @@ function ReceivablesView({
           <Field label="미수금액"><TextInput value={selectedRow ? formatWon(selectedRow.balanceAmount) : ""} readOnly /></Field>
           <Field label="결제예정일"><TextInput value={selectedRow?.expectedPaymentDate ?? ""} readOnly /></Field>
           <Field label="결제일"><TextInput type="number" min={1} max={31} value={selectedSite?.paymentDay ?? selectedRow?.paymentDay ?? ""} onChange={(e) => updatePaymentDay(Number(e.target.value))} /></Field>
+          <label className="flex items-center gap-2 rounded-md bg-navy-50 p-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={Boolean(selectedRow?.invoiceStatementIssued)} onChange={(e) => updateInvoiceIssue({ invoiceStatementIssued: e.target.checked, invoiceStatementIssuedDate: e.target.checked ? (selectedRow?.invoiceStatementIssuedDate || today) : "" })} />거래명세서 발행완료</label>
+          <Field label="거래명세서 발행일"><TextInput type="date" value={selectedRow?.invoiceStatementIssuedDate ?? ""} onChange={(e) => updateInvoiceIssue({ invoiceStatementIssuedDate: e.target.value, invoiceStatementIssued: Boolean(e.target.value) })} /></Field>
+          <label className="flex items-center gap-2 rounded-md bg-navy-50 p-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={Boolean(selectedRow?.taxInvoiceIssued)} onChange={(e) => updateInvoiceIssue({ taxInvoiceIssued: e.target.checked, taxInvoiceIssuedDate: e.target.checked ? (selectedRow?.taxInvoiceIssuedDate || today) : "" })} />세금계산서 발행완료</label>
+          <Field label="세금계산서 발행일"><TextInput type="date" value={selectedRow?.taxInvoiceIssuedDate ?? ""} onChange={(e) => updateInvoiceIssue({ taxInvoiceIssuedDate: e.target.value, taxInvoiceIssued: Boolean(e.target.value) })} /></Field>
           <Field label="입금금액"><TextInput type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} /></Field>
           <Field label="입금일"><TextInput type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></Field>
           <Field label="입금메모"><TextInput value={paymentMemo} onChange={(e) => setPaymentMemo(e.target.value)} /></Field>
@@ -2760,6 +2788,10 @@ function buildReceivableRows(data: AppData, closingMonth: string) {
         paidAmount,
         balanceAmount,
         invoiceIssueType: site.invoiceIssueType,
+        invoiceStatementIssued: Boolean(site.invoiceStatementIssued),
+        invoiceStatementIssuedDate: site.invoiceStatementIssuedDate || "",
+        taxInvoiceIssued: Boolean(site.taxInvoiceIssued),
+        taxInvoiceIssuedDate: site.taxInvoiceIssuedDate || "",
         closingMonth,
         closingDay: `${site.closingDay}일`,
         paymentDay,

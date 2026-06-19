@@ -3,7 +3,7 @@
 import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
-import { clearAppData, loadAppData, migrateAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
+import { clearAppData, exportAppData, importAppData, loadAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
 import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
@@ -233,7 +233,7 @@ export default function Home() {
   };
 
   const downloadJson = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const blob = new Blob([exportAppData(data)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -248,7 +248,7 @@ export default function Home() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const imported = migrateAppData(JSON.parse(String(reader.result)) as Partial<AppData>);
+        const imported = importAppData(String(reader.result));
         setData(imported);
         alert("JSON 백업 데이터를 불러왔습니다.");
       } catch {

@@ -22,6 +22,17 @@ export function saveAppData(data: AppData) {
   storageService.saveAppData(data);
 }
 
+export function exportAppData(data: AppData) {
+  return storageService.exportAppData(data);
+}
+
+export function importAppData(raw: string) {
+  return storageService.importAppData(raw, migrateAppData);
+}
+
+export function getSupabaseMigrationTables(data: AppData) {
+  return storageService.toSupabaseTables(data);
+}
 export function resetAppData() {
   return storageService.resetAppData(sampleData);
 }

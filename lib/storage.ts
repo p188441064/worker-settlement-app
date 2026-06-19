@@ -5,7 +5,7 @@ import { SCHEMA_VERSION, sampleData } from "./sample-data";
 import { ceilWon, getWorkerBaseAmount, normalizeRequestStatuses } from "./calculations";
 import { calculatePayrollDeduction } from "./payrollRules";
 
-const STORAGE_KEY = "worker-settlement-app-data-v1";
+export const STORAGE_KEY = "worker-settlement-app-data-v1";
 
 export function loadAppData(): AppData {
   if (typeof window === "undefined") return sampleData;

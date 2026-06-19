@@ -3,7 +3,7 @@
 import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
-import { loadAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
+import { STORAGE_KEY, loadAppData, migrateAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, ViewKey, WorkAssignment, WorkRequest, Worker } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
 
@@ -194,8 +194,9 @@ export default function Home() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        setData(JSON.parse(String(reader.result)) as AppData);
-        alert("JSON 데이터를 불러왔습니다.");
+        const imported = migrateAppData(JSON.parse(String(reader.result)) as Partial<AppData>);
+        setData(imported);
+        alert("JSON 백업 데이터를 불러왔습니다.");
       } catch {
         alert("JSON 형식을 확인해 주세요.");
       }
@@ -204,19 +205,30 @@ export default function Home() {
     event.target.value = "";
   };
 
+  const clearLocalStorage = () => {
+    if (!confirm("브라우저에 저장된 데이터를 초기화할까요? 현재 화면은 샘플 데이터로 다시 불러옵니다.")) return;
+    window.localStorage.removeItem(STORAGE_KEY);
+    setData(loadAppData());
+  };
+
+  const createSampleData = () => {
+    if (!confirm("현재 데이터를 샘플 데이터로 교체할까요? 필요하면 먼저 JSON 백업을 다운로드해 주세요.")) return;
+    setData(resetAppData());
+  };
+
   return (
-    <main className="flex min-h-screen bg-navy-50">
-      <aside className="w-64 shrink-0 bg-navy-900 p-5 text-white">
-        <div className="mb-8">
+    <main className="flex min-h-screen flex-col bg-navy-50 lg:flex-row">
+      <aside className="w-full shrink-0 bg-navy-900 p-4 text-white lg:w-64 lg:p-5">
+        <div className="mb-4 lg:mb-8">
           <p className="text-xs font-semibold text-mint-100">내부 업무용 MVP</p>
           <h1 className="mt-2 text-xl font-bold leading-tight">출역·노임 정산 도우미</h1>
         </div>
-        <nav className="grid gap-2">
+        <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-1">
           {menus.map((menu) => (
             <button
               key={menu.key}
               onClick={() => setView(menu.key)}
-              className={`rounded-md px-4 py-3 text-left text-sm font-semibold transition ${
+              className={`rounded-md px-3 py-2 text-left text-xs font-semibold transition sm:text-sm lg:px-4 lg:py-3 ${
                 view === menu.key ? "bg-mint-500 text-navy-900" : "text-navy-100 hover:bg-navy-800"
               }`}
             >
@@ -227,12 +239,12 @@ export default function Home() {
       </aside>
 
       <section className="min-w-0 flex-1">
-        <header className="flex h-20 items-center justify-between border-b border-navy-100 bg-white px-8">
+        <header className="flex flex-col gap-3 border-b border-navy-100 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between lg:h-20 lg:px-8 lg:py-0">
           <div>
             <p className="text-sm font-semibold text-slate-500">현재 월</p>
             <p className="text-xl font-bold text-navy-900">{selectedMonth}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               type="file"
               accept="application/json"
@@ -244,11 +256,12 @@ export default function Home() {
               JSON 불러오기
             </label>
             <Button variant="secondary" onClick={downloadJson}>JSON 백업</Button>
-            <Button variant="danger" onClick={() => confirm("샘플 데이터로 초기화할까요?") && setData(resetAppData())}>localStorage 초기화</Button>
+            <Button variant="secondary" onClick={createSampleData}>샘플 데이터 생성</Button>
+            <Button variant="danger" onClick={clearLocalStorage}>localStorage 초기화</Button>
           </div>
         </header>
 
-        <div className="space-y-5 p-8">
+        <div className="space-y-5 p-4 lg:p-8">
           {view === "dashboard" && <Dashboard data={data} selectedMonth={selectedMonth} />}
           {view === "workers" && <WorkersView data={data} updateData={updateData} />}
           {view === "clients" && <ClientsSitesView data={data} updateData={updateData} />}

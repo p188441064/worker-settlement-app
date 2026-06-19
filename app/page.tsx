@@ -278,6 +278,25 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
   const recent = [...requests].sort((a, b) => b.workDate.localeCompare(a.workDate) || b.requestDate.localeCompare(a.requestDate)).slice(0, 10);
   const monthRequestedCount = monthRequests.reduce((sum, request) => sum + request.requestedCount, 0);
   const monthAssignedCount = monthAssignments.length;
+  const receivableRows = buildReceivableRows(data, selectedMonth);
+  const totalClaim = receivableRows.reduce((sum, row) => sum + row.claimAmount, 0);
+  const totalPaid = receivableRows.reduce((sum, row) => sum + row.paidAmount, 0);
+  const totalReceivable = receivableRows.reduce((sum, row) => sum + row.balanceAmount, 0);
+  const overdueRows = receivableRows.filter((row) => row.balanceAmount > 0 && row.overdueDays > 0);
+  const topReceivableClients = data.clients
+    .map((client) => {
+      const clientRows = receivableRows.filter((row) => row.clientId === client.id);
+      return {
+        client,
+        claim: clientRows.reduce((sum, row) => sum + row.claimAmount, 0),
+        paid: clientRows.reduce((sum, row) => sum + row.paidAmount, 0),
+        balance: clientRows.reduce((sum, row) => sum + row.balanceAmount, 0),
+        overdue: clientRows.reduce((sum, row) => sum + (row.overdueDays > 0 ? row.balanceAmount : 0), 0)
+      };
+    })
+    .filter((item) => item.balance > 0)
+    .sort((a, b) => b.balance - a.balance)
+    .slice(0, 5);
 
   return (
     <>
@@ -289,6 +308,33 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
         <StatCard label="월 요청인원" value={`${monthRequestedCount}명`} />
         <StatCard label="월 배치인원" value={`${monthAssignedCount}명`} tone="mint" />
       </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <StatCard label="월 청구금액" value={formatWon(totalClaim)} />
+        <StatCard label="월 입금금액" value={formatWon(totalPaid)} tone="mint" />
+        <StatCard label="전체 미수금" value={formatWon(totalReceivable)} />
+        <StatCard label="연체 현장" value={`${overdueRows.length}건`} />
+      </div>
+
+      <Panel title="거래처별 미수금 상위 5건">
+        <DataTable>
+          <table className="w-full border-collapse">
+            <thead><tr>{["거래처", "청구금액", "입금금액", "미수금액", "연체금액"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+            <tbody>
+              {topReceivableClients.map((item) => (
+                <tr key={item.client.id}>
+                  <td className={td}>{item.client.name}</td>
+                  <td className={td}>{formatWon(item.claim)}</td>
+                  <td className={td}>{formatWon(item.paid)}</td>
+                  <td className={td}>{formatWon(item.balance)}</td>
+                  <td className={td}>{formatWon(item.overdue)}</td>
+                </tr>
+              ))}
+              {topReceivableClients.length === 0 && <tr><td className={td} colSpan={5}>현재 월 미수금이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </DataTable>
+      </Panel>
 
       <Panel title="최근 요청건 10건">
         <RequestTable requests={recent} data={data} />
@@ -1333,6 +1379,7 @@ function ReceivablesView({
   const [selectedKey, setSelectedKey] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(today);
+  const [paymentMemo, setPaymentMemo] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [siteSearch, setSiteSearch] = useState("");
   const rows = buildReceivableRows(data, selectedMonth)
@@ -1340,23 +1387,33 @@ function ReceivablesView({
     .filter((row) => row.clientName.toLowerCase().includes(clientSearch.toLowerCase()))
     .filter((row) => row.siteName.toLowerCase().includes(siteSearch.toLowerCase()));
   const selectedRow = rows.find((row) => row.key === selectedKey) ?? rows[0];
+  const selectedSite = selectedRow ? data.sites.find((site) => site.id === selectedRow.siteId) : undefined;
   const totalReceivable = rows.reduce((sum, row) => sum + row.balanceAmount, 0);
   const totalClaim = rows.reduce((sum, row) => sum + row.claimAmount, 0);
   const totalPaid = rows.reduce((sum, row) => sum + row.paidAmount, 0);
+  const overdueReceivable = rows.reduce((sum, row) => sum + (row.overdueDays > 0 ? row.balanceAmount : 0), 0);
+  const overdueCount = rows.filter((row) => row.balanceAmount > 0 && row.overdueDays > 0).length;
   const clientTotals = data.clients.map((client) => {
     const clientRows = rows.filter((row) => row.clientId === client.id);
     return {
       client,
-      balance: clientRows.reduce((sum, row) => sum + row.balanceAmount, 0)
+      claim: clientRows.reduce((sum, row) => sum + row.claimAmount, 0),
+      paid: clientRows.reduce((sum, row) => sum + row.paidAmount, 0),
+      balance: clientRows.reduce((sum, row) => sum + row.balanceAmount, 0),
+      overdue: clientRows.reduce((sum, row) => sum + (row.overdueDays > 0 ? row.balanceAmount : 0), 0)
     };
-  }).filter((item) => item.balance > 0);
+  }).filter((item) => item.claim > 0 || item.paid > 0 || item.balance > 0);
   const siteTotals = rows
-    .map((row) => ({ siteId: row.siteId, siteName: row.siteName, balance: row.balanceAmount }))
-    .filter((item) => item.balance > 0);
+    .map((row) => ({ siteId: row.siteId, siteName: row.siteName, claim: row.claimAmount, paid: row.paidAmount, balance: row.balanceAmount, overdueDays: row.overdueDays }))
+    .filter((item) => item.claim > 0 || item.paid > 0 || item.balance > 0);
+  const paymentHistory = selectedRow
+    ? data.receivablePayments
+      .filter((payment) => payment.siteId === selectedRow.siteId && payment.closingMonth === selectedMonth)
+      .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate))
+    : [];
 
-  const savePayment = () => {
+  const addPayment = (amount: number, memo = paymentMemo) => {
     if (!selectedRow) return alert("입금 처리할 현장을 선택해 주세요.");
-    const amount = Number(paymentAmount);
     if (!amount || amount <= 0) return alert("입금금액을 입력해 주세요.");
     updateData({
       ...data,
@@ -1369,11 +1426,28 @@ function ReceivablesView({
           closingMonth: selectedMonth,
           amount,
           paymentDate,
-          memo: ""
+          memo
         }
       ]
     });
     setPaymentAmount("");
+    setPaymentMemo("");
+  };
+
+  const savePayment = () => addPayment(Number(paymentAmount));
+  const saveFullPayment = () => {
+    if (!selectedRow) return alert("완납 처리할 현장을 선택해 주세요.");
+    if (selectedRow.balanceAmount <= 0) return alert("이미 완납된 현장입니다.");
+    addPayment(selectedRow.balanceAmount, paymentMemo || "완납 처리");
+  };
+
+  const updatePaymentDay = (paymentDay: number) => {
+    if (!selectedRow || !selectedSite) return;
+    const safeDay = Math.min(Math.max(paymentDay || 1, 1), 31);
+    updateData({
+      ...data,
+      sites: data.sites.map((site) => site.id === selectedRow.siteId ? { ...site, paymentDay: safeDay } : site)
+    });
   };
 
   const downloadExcel = async () => {
@@ -1388,19 +1462,28 @@ function ReceivablesView({
       마감월: row.closingMonth,
       마감일: row.closingDay,
       결제예정일: row.expectedPaymentDate,
+      연체일수: row.overdueDays,
       입금일: row.paymentDates,
       상태: row.status,
       비고: row.memo
     }));
+    const clientSheetRows = clientTotals.map((item) => ({
+      거래처명: item.client.name,
+      청구금액: item.claim,
+      입금금액: item.paid,
+      미수금액: item.balance,
+      연체금액: item.overdue
+    }));
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(sheetRows), "전체 미수금");
+    XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(clientSheetRows), "거래처별 합계");
     XLSX.writeFile(book, `전체_미수금_${selectedMonth}.xlsx`);
   };
 
   return (
     <div className="space-y-5">
       <Panel title="미수금 조회 조건">
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           <Field label="마감월"><TextInput type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} /></Field>
           <Field label="거래처"><SelectInput value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}><option value="all">전체 거래처</option>{data.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</SelectInput></Field>
           <Field label="거래처 검색"><TextInput value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} /></Field>
@@ -1409,52 +1492,85 @@ function ReceivablesView({
         </div>
       </Panel>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-5 gap-4">
         <StatCard label="전체 청구금액" value={formatWon(totalClaim)} />
         <StatCard label="전체 입금금액" value={formatWon(totalPaid)} tone="mint" />
         <StatCard label="전체 미수금" value={formatWon(totalReceivable)} />
+        <StatCard label="연체 미수금" value={formatWon(overdueReceivable)} />
+        <StatCard label="연체 현장" value={`${overdueCount}건`} />
       </div>
 
       <Panel title="거래처별 미수금 합계">
-        <div className="grid grid-cols-4 gap-3">
-          {clientTotals.map(({ client, balance }) => (
-            <div key={client.id} className="rounded-md border border-navy-100 bg-white p-3">
-              <p className="font-bold text-navy-900">{client.name}</p>
-              <p className="mt-1 text-lg font-bold text-rose-700">{formatWon(balance)}</p>
-            </div>
-          ))}
-          {clientTotals.length === 0 && <p className="text-sm text-slate-500">미수금이 없습니다.</p>}
-        </div>
+        <DataTable>
+          <table className="w-full border-collapse">
+            <thead><tr>{["거래처명", "청구금액", "입금금액", "미수금액", "연체금액"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+            <tbody>
+              {clientTotals.map((item) => (
+                <tr key={item.client.id}>
+                  <td className={td}>{item.client.name}</td>
+                  <td className={td}>{formatWon(item.claim)}</td>
+                  <td className={td}>{formatWon(item.paid)}</td>
+                  <td className={td}>{formatWon(item.balance)}</td>
+                  <td className={td}>{formatWon(item.overdue)}</td>
+                </tr>
+              ))}
+              {clientTotals.length === 0 && <tr><td className={td} colSpan={5}>미수금 데이터가 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </DataTable>
       </Panel>
 
       <Panel title="현장별 미수금 합계">
-        <div className="grid grid-cols-4 gap-3">
-          {siteTotals.map((item) => (
-            <div key={item.siteId} className="rounded-md border border-navy-100 bg-white p-3">
-              <p className="font-bold text-navy-900">{item.siteName}</p>
-              <p className="mt-1 text-lg font-bold text-rose-700">{formatWon(item.balance)}</p>
-            </div>
-          ))}
-          {siteTotals.length === 0 && <p className="text-sm text-slate-500">현장별 미수금이 없습니다.</p>}
-        </div>
+        <DataTable>
+          <table className="w-full border-collapse">
+            <thead><tr>{["현장명", "청구금액", "입금금액", "미수금액", "연체일수"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+            <tbody>
+              {siteTotals.map((item) => (
+                <tr key={item.siteId}>
+                  <td className={td}>{item.siteName}</td>
+                  <td className={td}>{formatWon(item.claim)}</td>
+                  <td className={td}>{formatWon(item.paid)}</td>
+                  <td className={td}>{formatWon(item.balance)}</td>
+                  <td className={td}>{item.overdueDays > 0 ? `${item.overdueDays}일` : "-"}</td>
+                </tr>
+              ))}
+              {siteTotals.length === 0 && <tr><td className={td} colSpan={5}>현장별 미수금이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </DataTable>
       </Panel>
 
       <Panel title="전체 미수금 목록">
         <DataTable>
           <table className="w-full border-collapse">
-            <thead><tr>{["거래처명", "현장명", "청구금액", "입금금액", "미수금액", "계산서", "마감월", "마감일", "결제예정일", "입금일", "상태", "비고"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-            <tbody>{rows.map((row) => <tr key={row.key} className={selectedRow?.key === row.key ? "bg-mint-50" : ""}><td className={td}><button className="font-bold text-navy-900" onClick={() => setSelectedKey(row.key)}>{row.clientName}</button></td><td className={td}>{row.siteName}</td><td className={td}>{formatWon(row.claimAmount)}</td><td className={td}>{formatWon(row.paidAmount)}</td><td className={td}>{formatWon(row.balanceAmount)}</td><td className={td}>{row.invoiceIssueType === "ISSUED" ? "발행" : "미발행"}</td><td className={td}>{row.closingMonth}</td><td className={td}>{row.closingDay}</td><td className={td}>{row.expectedPaymentDate}</td><td className={td}>{row.paymentDates}</td><td className={td}><ReceivableStatusBadge status={row.status} /></td><td className={td}>{row.memo}</td></tr>)}</tbody>
+            <thead><tr>{["거래처명", "현장명", "청구금액", "입금금액", "미수금액", "계산서", "마감월", "마감일", "결제예정일", "연체일수", "입금일", "상태", "비고"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.key} className={selectedRow?.key === row.key ? "bg-mint-50" : ""}><td className={td}><button className="font-bold text-navy-900" onClick={() => setSelectedKey(row.key)}>{row.clientName}</button></td><td className={td}>{row.siteName}</td><td className={td}>{formatWon(row.claimAmount)}</td><td className={td}>{formatWon(row.paidAmount)}</td><td className={td}>{formatWon(row.balanceAmount)}</td><td className={td}>{row.invoiceIssueType === "ISSUED" ? "발행" : "미발행"}</td><td className={td}>{row.closingMonth}</td><td className={td}>{row.closingDay}</td><td className={td}>{row.expectedPaymentDate}</td><td className={td}>{row.overdueDays > 0 ? `${row.overdueDays}일` : "-"}</td><td className={td}>{row.paymentDates}</td><td className={td}><ReceivableStatusBadge status={row.status} /></td><td className={td}>{row.memo}</td></tr>)}</tbody>
           </table>
         </DataTable>
       </Panel>
 
-      <Panel title="입금 처리">
-        <div className="grid grid-cols-5 gap-3">
+      <Panel title="입금 및 결제예정일 관리">
+        <div className="grid grid-cols-6 gap-3">
           <Field label="선택 현장"><TextInput value={selectedRow ? `${selectedRow.clientName} / ${selectedRow.siteName}` : ""} readOnly /></Field>
           <Field label="미수금액"><TextInput value={selectedRow ? formatWon(selectedRow.balanceAmount) : ""} readOnly /></Field>
+          <Field label="결제예정일"><TextInput value={selectedRow?.expectedPaymentDate ?? ""} readOnly /></Field>
+          <Field label="결제일"><TextInput type="number" min={1} max={31} value={selectedSite?.paymentDay ?? selectedRow?.paymentDay ?? ""} onChange={(e) => updatePaymentDay(Number(e.target.value))} /></Field>
           <Field label="입금금액"><TextInput type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} /></Field>
           <Field label="입금일"><TextInput type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></Field>
-          <div className="flex items-end"><Button onClick={savePayment}>입금 처리</Button></div>
+          <Field label="입금메모"><TextInput value={paymentMemo} onChange={(e) => setPaymentMemo(e.target.value)} /></Field>
+          <div className="flex items-end gap-2"><Button onClick={savePayment}>부분입금 처리</Button><Button variant="secondary" onClick={saveFullPayment}>완납 처리</Button></div>
+        </div>
+        <div className="mt-4 rounded-md border border-navy-100 bg-white p-3">
+          <p className="mb-2 text-sm font-bold text-navy-900">선택 현장 입금 이력</p>
+          <DataTable>
+            <table className="w-full border-collapse">
+              <thead><tr>{["입금일", "입금금액", "메모"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+              <tbody>
+                {paymentHistory.map((payment) => <tr key={payment.id}><td className={td}>{payment.paymentDate}</td><td className={td}>{formatWon(payment.amount)}</td><td className={td}>{payment.memo}</td></tr>)}
+                {paymentHistory.length === 0 && <tr><td className={td} colSpan={3}>입금 이력이 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </DataTable>
         </div>
       </Panel>
     </div>
@@ -1931,7 +2047,14 @@ function getExpectedPaymentDate(closingMonth: string, paymentDay: number) {
   const [year, month] = closingMonth.split("-").map(Number);
   const next = new Date(year, month, 1);
   const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(Math.min(paymentDay, lastDay)).padStart(2, "0")}`;
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(Math.min(Math.max(paymentDay || 1, 1), lastDay)).padStart(2, "0")}`;
+}
+
+function getOverdueDays(expectedPaymentDate: string, basisDate = today) {
+  const expected = new Date(`${expectedPaymentDate}T00:00:00`);
+  const basis = new Date(`${basisDate}T00:00:00`);
+  const diff = Math.floor((basis.getTime() - expected.getTime()) / (1000 * 60 * 60 * 24));
+  return diff > 0 ? diff : 0;
 }
 
 function buildReceivableRows(data: AppData, closingMonth: string) {
@@ -1944,6 +2067,8 @@ function buildReceivableRows(data: AppData, closingMonth: string) {
       const paidAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
       const balanceAmount = Math.max(claimAmount - paidAmount, 0);
       const status: ReceivableStatus = balanceAmount <= 0 && claimAmount > 0 ? "완납" : paidAmount > 0 ? "부분입금" : "미수";
+      const paymentDay = site.paymentDay || client?.paymentDay || 10;
+      const expectedPaymentDate = getExpectedPaymentDate(closingMonth, paymentDay);
       return {
         key: `${site.id}-${closingMonth}`,
         clientId: site.clientId,
@@ -1956,7 +2081,9 @@ function buildReceivableRows(data: AppData, closingMonth: string) {
         invoiceIssueType: site.invoiceIssueType,
         closingMonth,
         closingDay: `${site.closingDay}일`,
-        expectedPaymentDate: getExpectedPaymentDate(closingMonth, client?.paymentDay ?? site.paymentDay),
+        paymentDay,
+        expectedPaymentDate,
+        overdueDays: balanceAmount > 0 ? getOverdueDays(expectedPaymentDate) : 0,
         paymentDates: payments.map((payment) => payment.paymentDate).join(", "),
         memo: site.memo,
         status

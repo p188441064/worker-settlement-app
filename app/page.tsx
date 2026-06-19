@@ -18,6 +18,7 @@ const menus: Array<{ key: ViewKey; label: string }> = [
   { key: "journal", label: "근로자 개인일지" },
   { key: "rules", label: "계산기준 관리" },
   { key: "settings", label: "설정" },
+  { key: "checklist", label: "운영 체크리스트" },
   { key: "help", label: "도움말" }
 ];
 
@@ -299,6 +300,7 @@ export default function Home() {
           {view === "journal" && <WorkerJournalView data={data} />}
           {view === "rules" && <RulesView data={data} updateData={updateData} />}
           {view === "settings" && <SettingsView data={data} updateData={updateData} />}
+          {view === "checklist" && <OperationChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "help" && <HelpView />}
         </div>
       </section>
@@ -479,6 +481,147 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
         <AssignmentTable assignments={todayAssignments} data={data} />
       </Panel>
     </>
+  );
+}
+
+function OperationChecklistView({ data, selectedMonth }: { data: AppData; selectedMonth: string }) {
+  const requests = normalizeRequestStatuses(data.workRequests, data.assignments);
+  const todayRequests = requests.filter((request) => request.workDate === today);
+  const todayRequestedCount = todayRequests.reduce((sum, request) => sum + request.requestedCount, 0);
+  const todayAssignedCount = data.assignments.filter((assignment) => assignment.workDate === today && assignment.status !== "취소").length;
+  const todayShortageCount = todayRequests.reduce((sum, request) => sum + Math.max(request.requestedCount - getAssignedCount(request.id, data.assignments), 0), 0);
+  const missingDocumentWorkers = data.workers.filter((worker) => getWorkerDocumentStatus(worker) !== "완료");
+  const receivableRows = buildReceivableRows(data, selectedMonth);
+  const totalReceivable = receivableRows.reduce((sum, row) => sum + row.balanceAmount, 0);
+  const paymentDueRows = receivableRows.filter((row) => row.balanceAmount > 0 && row.expectedPaymentDate >= today).sort((a, b) => a.expectedPaymentDate.localeCompare(b.expectedPaymentDate));
+  const overdueRows = receivableRows.filter((row) => row.balanceAmount > 0 && row.overdueDays > 0).sort((a, b) => b.overdueDays - a.overdueDays);
+  const closingWindowEnd = new Date(`${today}T00:00:00`);
+  closingWindowEnd.setDate(closingWindowEnd.getDate() + 7);
+  const [closingYear, closingMonth] = selectedMonth.split("-").map(Number);
+  const monthAssignments = data.assignments.filter((assignment) => isSameMonth(assignment.workDate, selectedMonth) && assignment.status !== "취소");
+  const closingDueSites = data.sites
+    .map((site) => {
+      const lastDay = new Date(closingYear, closingMonth, 0).getDate();
+      const closingDate = `${selectedMonth}-${String(Math.min(site.closingDay || 25, lastDay)).padStart(2, "0")}`;
+      const closingAt = new Date(`${closingDate}T00:00:00`);
+      const assignmentCount = monthAssignments.filter((assignment) => assignment.siteId === site.id).length;
+      return { site, closingDate, closingAt, assignmentCount };
+    })
+    .filter((item) => item.assignmentCount > 0 && item.closingDate >= today && item.closingAt <= closingWindowEnd)
+    .sort((a, b) => a.closingDate.localeCompare(b.closingDate));
+
+  const checklistItems = [
+    {
+      title: "오늘 요청/배치 확인",
+      status: todayShortageCount > 0 ? "확인필요" : "정상",
+      tone: todayShortageCount > 0 ? "amber" : "mint",
+      summary: `요청 ${todayRequestedCount}명 / 배치 ${todayAssignedCount}명 / 부족 ${todayShortageCount}명`,
+      action: todayShortageCount > 0 ? "요청·배치 입력에서 부족인원을 보강하세요." : "오늘 요청 대비 배치가 안정적입니다."
+    },
+    {
+      title: "서류 미비 근로자",
+      status: missingDocumentWorkers.length > 0 ? "확인필요" : "정상",
+      tone: missingDocumentWorkers.length > 0 ? "amber" : "mint",
+      summary: `${missingDocumentWorkers.length}명`,
+      action: missingDocumentWorkers.length > 0 ? "근로자 관리에서 신분증/이수증 업로드 상태를 확인하세요." : "필수 서류 미비 근로자가 없습니다."
+    },
+    {
+      title: "미수금/결제예정",
+      status: totalReceivable > 0 ? "확인필요" : "정상",
+      tone: totalReceivable > 0 ? "amber" : "mint",
+      summary: `${formatWon(totalReceivable)} / 결제예정 ${paymentDueRows.length}건`,
+      action: totalReceivable > 0 ? "전체 미수금 관리에서 입금/부분입금/완납 상태를 업데이트하세요." : "현재 미수금이 없습니다."
+    },
+    {
+      title: "마감 예정 현장",
+      status: closingDueSites.length > 0 ? "확인필요" : "정상",
+      tone: closingDueSites.length > 0 ? "amber" : "mint",
+      summary: `7일 내 ${closingDueSites.length}건`,
+      action: closingDueSites.length > 0 ? "월말 정산에서 거래명세서와 지급명세서를 미리 확인하세요." : "7일 내 마감 예정 현장이 없습니다."
+    },
+    {
+      title: "백업 필요 알림",
+      status: "권장",
+      tone: "slate",
+      summary: "오늘 업무 전/후 JSON 백업 권장",
+      action: "상단 JSON 백업 버튼으로 운영 데이터를 내려받아 보관하세요."
+    }
+  ] as const;
+
+  return (
+    <div className="space-y-5">
+      <Panel title="오늘 운영 체크리스트">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {checklistItems.map((item) => (
+            <article key={item.title} className="rounded-md border border-navy-100 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-sm font-black text-navy-900">{item.title}</h3>
+                <Badge tone={item.tone}>{item.status}</Badge>
+              </div>
+              <p className="mt-3 text-lg font-black text-navy-900">{item.summary}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{item.action}</p>
+            </article>
+          ))}
+        </div>
+      </Panel>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="서류 미비 근로자 확인">
+          <div className="grid gap-2">
+            {missingDocumentWorkers.slice(0, 8).map((worker) => (
+              <div key={worker.id} className="rounded-md border border-navy-100 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <b>{worker.name}</b>
+                  <Badge tone={docTone(getWorkerDocumentStatus(worker))}>{getWorkerDocumentStatus(worker)}</Badge>
+                </div>
+                <p className="mt-1 text-slate-500">{worker.mobile || worker.phone} / {worker.jobType || "직종 미입력"}</p>
+              </div>
+            ))}
+            {missingDocumentWorkers.length === 0 && <p className="rounded-md bg-mint-50 p-3 text-sm font-bold text-mint-600">서류 미비 근로자가 없습니다.</p>}
+          </div>
+        </Panel>
+
+        <Panel title="미수금/결제예정 확인">
+          <div className="grid gap-2">
+            {[...overdueRows, ...paymentDueRows].slice(0, 8).map((row) => (
+              <div key={row.key} className="rounded-md border border-navy-100 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <b>{row.clientName}</b>
+                  <ReceivableStatusBadge status={row.status} />
+                </div>
+                <p className="mt-1 text-slate-600">{row.siteName} / 미수 {formatWon(row.balanceAmount)}</p>
+                <p className="text-slate-500">결제예정일 {row.expectedPaymentDate} / 연체 {row.overdueDays}일</p>
+              </div>
+            ))}
+            {overdueRows.length + paymentDueRows.length === 0 && <p className="rounded-md bg-mint-50 p-3 text-sm font-bold text-mint-600">확인할 미수금/결제예정 항목이 없습니다.</p>}
+          </div>
+        </Panel>
+      </div>
+
+      <Panel title="마감 예정 현장">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {closingDueSites.map((item) => (
+            <article key={item.site.id} className="rounded-md border border-navy-100 p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <b>{item.site.siteName || item.site.name}</b>
+                <Badge tone="amber">{item.closingDate}</Badge>
+              </div>
+              <p className="mt-2 text-slate-600">{data.clients.find((client) => client.id === item.site.clientId)?.name}</p>
+              <p className="text-slate-500">배치 {item.assignmentCount}건 / 계산서 {item.site.invoiceIssueType === "ISSUED" ? "발행" : "미발행"}</p>
+            </article>
+          ))}
+          {closingDueSites.length === 0 && <p className="rounded-md bg-mint-50 p-3 text-sm font-bold text-mint-600">7일 내 마감 예정 현장이 없습니다.</p>}
+        </div>
+      </Panel>
+
+      <Panel title="모바일 운영 메모">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <p className="rounded-md bg-navy-50 p-3 text-sm text-slate-700">모바일에서는 체크리스트 카드만 먼저 확인하고, 상세 입력은 필요한 메뉴로 이동해 처리하세요.</p>
+          <p className="rounded-md bg-navy-50 p-3 text-sm text-slate-700">마감자료 출력과 대량 엑셀 다운로드는 PC에서 확인하는 것을 권장합니다.</p>
+          <p className="rounded-md bg-navy-50 p-3 text-sm text-slate-700">업무 종료 전 JSON 백업을 내려받으면 브라우저 변경이나 장비 교체에 대비할 수 있습니다.</p>
+        </div>
+      </Panel>
+    </div>
   );
 }
 

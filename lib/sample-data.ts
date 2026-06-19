@@ -169,6 +169,7 @@ export const sampleData: AppData = {
       { viewKey: "journal", admin: true, user: true, sensitive: true },
       { viewKey: "rules", admin: true, user: false, sensitive: true },
       { viewKey: "settings", admin: true, user: false, sensitive: true },
+      { viewKey: "checklist", admin: true, user: true, sensitive: false },
       { viewKey: "help", admin: true, user: true, sensitive: false }
     ]
   },

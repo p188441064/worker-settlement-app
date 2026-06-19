@@ -268,4 +268,4 @@ export interface AppData {
   receivablePayments: ReceivablePayment[];
 }
 
-export type ViewKey = "dashboard" | "workers" | "clients" | "attendance" | "settlement" | "receivables" | "journal" | "rules" | "settings" | "help";
+export type ViewKey = "dashboard" | "workers" | "clients" | "attendance" | "settlement" | "receivables" | "journal" | "rules" | "settings" | "checklist" | "help";

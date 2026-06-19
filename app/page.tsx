@@ -623,7 +623,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
         </Panel>
       )}
 
-      <Panel title="근로자 목록" actions={<div className="flex items-center gap-2"><label className="text-sm"><input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} /> 서류누락</label><TextInput placeholder="코드, 이름, 휴대폰, 주소 검색" value={query} onChange={(e) => setQuery(e.target.value)} className="w-full sm:w-72" /></div>}>
+      <Panel title="근로자 목록" actions={<div className="flex flex-wrap items-center gap-2"><label className="text-sm"><input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} /> 서류누락</label><TextInput placeholder="코드, 이름, 휴대폰, 주소 검색" value={query} onChange={(e) => setQuery(e.target.value)} className="w-full sm:w-72" /></div>}>
         <DataTable>
           <table className="w-full border-collapse">
             <thead><tr><th className={th}>근로자코드</th><th className={th}>성명</th><th className={th}>생년월일</th><th className={th}>나이</th><th className={th}>60세 여부</th><th className={th}>휴대폰</th><th className={th}>직종</th><th className={th}>등록일</th><th className={th}>서류상태</th><th className={th}>최근출역일</th><th className={th}>관리</th></tr></thead>
@@ -833,11 +833,11 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
       <Panel title="거래처 · 현장 트리">
         <div className="grid gap-3">
-          <div className="flex gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
             <TextInput placeholder="거래처명, 현장명, 코드, 담당자" value={query} onChange={(e) => setQuery(e.target.value)} />
             <Button variant="secondary" onClick={() => setQuery(query.trim())}>검색</Button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={startNewClient}>거래처 신규</Button>
             <Button variant="secondary" onClick={startNewSite} disabled={!clientForm.id}>현장 신규</Button>
           </div>
@@ -869,7 +869,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
       </Panel>
 
       <div className="space-y-5">
-        <Panel title="거래처 상세정보" actions={<div className="flex gap-2"><Button onClick={saveClient}>{clientForm.id ? "거래처 수정" : "거래처 저장"}</Button><Button variant="danger" onClick={deleteClient} disabled={!clientForm.id}>거래처 삭제</Button></div>}>
+        <Panel title="거래처 상세정보" actions={<div className="flex flex-wrap gap-2"><Button onClick={saveClient}>{clientForm.id ? "거래처 수정" : "거래처 저장"}</Button><Button variant="danger" onClick={deleteClient} disabled={!clientForm.id}>거래처 삭제</Button></div>}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Field label="거래처명"><TextInput value={clientForm.name} onChange={(e) => setClientField("name", e.target.value)} /></Field>
             <Field label="담당자명"><TextInput value={clientForm.managerName} onChange={(e) => setClientField("managerName", e.target.value)} /></Field>
@@ -879,11 +879,11 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
             <Field label="이메일2"><TextInput value={clientForm.email2} onChange={(e) => setClientField("email2", e.target.value)} /></Field>
             <Field label="마감일"><TextInput type="number" value={clientForm.closingDay} onChange={(e) => setClientField("closingDay", Number(e.target.value))} /></Field>
             <Field label="결제일"><TextInput type="number" value={clientForm.paymentDay} onChange={(e) => setClientField("paymentDay", Number(e.target.value))} /></Field>
-            <div className="col-span-4"><Field label="비고"><TextInput value={clientForm.memo} onChange={(e) => setClientField("memo", e.target.value)} /></Field></div>
+            <div className="xl:col-span-4"><Field label="비고"><TextInput value={clientForm.memo} onChange={(e) => setClientField("memo", e.target.value)} /></Field></div>
           </div>
         </Panel>
 
-        <Panel title="현장 상세정보" actions={<div className="flex gap-2"><Button variant="secondary" onClick={startNewSite} disabled={!clientForm.id}>현장 신규</Button><Button onClick={saveSite} disabled={!clientForm.id}>{siteForm.id ? "현장 수정" : "현장 저장"}</Button><Button variant="danger" onClick={deleteSite} disabled={!siteForm.id}>현장 삭제</Button></div>}>
+        <Panel title="현장 상세정보" actions={<div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={startNewSite} disabled={!clientForm.id}>현장 신규</Button><Button onClick={saveSite} disabled={!clientForm.id}>{siteForm.id ? "현장 수정" : "현장 저장"}</Button><Button variant="danger" onClick={deleteSite} disabled={!siteForm.id}>현장 삭제</Button></div>}>
           {clientForm.id ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Field label="소속 거래처"><TextInput value={clientForm.name} readOnly /></Field>
@@ -897,7 +897,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
               <Field label="담당자 연락처"><TextInput value={siteForm.managerPhone} onChange={(e) => setSiteField("managerPhone", e.target.value)} /></Field>
               <Field label="이메일1"><TextInput value={siteForm.settlementEmail1} onChange={(e) => setSiteField("settlementEmail1", e.target.value)} /></Field>
               <Field label="이메일2"><TextInput value={siteForm.settlementEmail2} onChange={(e) => setSiteField("settlementEmail2", e.target.value)} /></Field>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2"><Field label="마감일"><TextInput type="number" value={siteForm.closingDay} onChange={(e) => setSiteField("closingDay", Number(e.target.value))} /></Field><Field label="결제일"><TextInput type="number" value={siteForm.paymentDay} onChange={(e) => setSiteField("paymentDay", Number(e.target.value))} /></Field></div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2"><Field label="마감일"><TextInput type="number" value={siteForm.closingDay} onChange={(e) => setSiteField("closingDay", Number(e.target.value))} /></Field><Field label="결제일"><TextInput type="number" value={siteForm.paymentDay} onChange={(e) => setSiteField("paymentDay", Number(e.target.value))} /></Field></div>
               <Field label="기본단가"><TextInput type="number" value={siteForm.defaultUnitPrice} onChange={(e) => setSiteField("defaultUnitPrice", Number(e.target.value))} /></Field>
               <Field label="기본공제유형"><DeductionSelect value={siteForm.defaultDeductionType} onChange={(value) => setSiteField("defaultDeductionType", value)} /></Field>
               <Field label="계산서 발행 여부"><SelectInput value={siteForm.invoiceIssueType} onChange={(e) => setSiteField("invoiceIssueType", e.target.value as Site["invoiceIssueType"])}><option value="ISSUED">계산서 발행</option><option value="NOT_ISSUED">계산서 미발행</option></SelectInput></Field>
@@ -907,13 +907,13 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
               <Field label="국민연금 출력 기준"><SelectInput value={siteForm.pensionOutputBasis} onChange={(e) => setSiteField("pensionOutputBasis", e.target.value as Site["pensionOutputBasis"])}><option value="MONTH_FIRST_DAY">매월 1일 기준</option><option value="DATE_BASED">실제 날짜 기준</option><option value="FIRST_MONTH_NOT_APPLY">첫달 미부과</option><option value="MANUAL">수동</option></SelectInput></Field>
               <Field label="첫달 보험 처리"><SelectInput value={siteForm.firstMonthInsuranceHandling} onChange={(e) => setSiteField("firstMonthInsuranceHandling", e.target.value as Site["firstMonthInsuranceHandling"])}><option value="APPLY">첫달도 반영</option><option value="NOT_APPLY">첫달 미부과·비희망</option><option value="MANUAL">수동</option></SelectInput></Field>
               <Field label="국민연금 기준금액"><TextInput type="number" value={siteForm.pensionMonthlyThreshold} onChange={(e) => setSiteField("pensionMonthlyThreshold", Number(e.target.value))} /></Field>
-              <div className="col-span-2"><Field label="주소"><TextInput value={siteForm.address} onChange={(e) => setSiteField("address", e.target.value)} /></Field></div>
-              <div className="col-span-2"><Field label="기본 작업내용"><TextInput value={siteForm.defaultTaskDescription} onChange={(e) => setSiteField("defaultTaskDescription", e.target.value)} /></Field></div>
-              <div className="col-span-4"><Field label="비고"><TextInput value={siteForm.memo} onChange={(e) => setSiteField("memo", e.target.value)} /></Field></div>
-              <div className="col-span-4"><Field label="약도/오시는 길"><TextArea value={siteForm.directions} onChange={(e) => setSiteField("directions", e.target.value)} className="min-h-28" /></Field></div>
+              <div className="xl:col-span-2"><Field label="주소"><TextInput value={siteForm.address} onChange={(e) => setSiteField("address", e.target.value)} /></Field></div>
+              <div className="xl:col-span-2"><Field label="기본 작업내용"><TextInput value={siteForm.defaultTaskDescription} onChange={(e) => setSiteField("defaultTaskDescription", e.target.value)} /></Field></div>
+              <div className="xl:col-span-4"><Field label="비고"><TextInput value={siteForm.memo} onChange={(e) => setSiteField("memo", e.target.value)} /></Field></div>
+              <div className="xl:col-span-4"><Field label="약도/오시는 길"><TextArea value={siteForm.directions} onChange={(e) => setSiteField("directions", e.target.value)} className="min-h-28" /></Field></div>
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-600"><input type="checkbox" checked={siteForm.carryOverPreviousMonth} onChange={(e) => setSiteField("carryOverPreviousMonth", e.target.checked)} />전월 연속근로 반영</label>
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-600"><input type="checkbox" checked={siteForm.isActive} onChange={(e) => setSiteField("isActive", e.target.checked)} />활성상태</label>
-              <div className="col-span-2 flex items-center gap-3 rounded-md bg-navy-50 px-3 text-sm text-navy-800"><b>현장별 정산 연결</b><span>{siteForm.id ? `${clientForm.name} / ${siteForm.siteName}` : "저장 후 월말 정산 현장 선택에 표시됩니다."}</span></div>
+              <div className="xl:col-span-2 flex items-center gap-3 rounded-md bg-navy-50 px-3 text-sm text-navy-800"><b>현장별 정산 연결</b><span>{siteForm.id ? `${clientForm.name} / ${siteForm.siteName}` : "저장 후 월말 정산 현장 선택에 표시됩니다."}</span></div>
             </div>
           ) : (
             <p className="text-sm text-slate-500">거래처를 먼저 선택하거나 저장해 주세요.</p>
@@ -1143,10 +1143,10 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
           <Field label="요청인원"><TextInput type="number" value={requestForm.requestedCount} onChange={(e) => setRequestForm({ ...requestForm, requestedCount: Number(e.target.value) })} /></Field>
           <Field label="단가"><TextInput type="number" value={requestForm.unitPrice} onChange={(e) => setRequestForm({ ...requestForm, unitPrice: Number(e.target.value) })} /></Field>
           <Field label="공제유형"><DeductionSelect value={requestForm.deductionType} onChange={(value) => setRequestForm({ ...requestForm, deductionType: value })} /></Field>
-          <div className="col-span-2"><Field label="작업내용"><TextInput value={requestForm.taskDescription} onChange={(e) => setRequestForm({ ...requestForm, taskDescription: e.target.value })} /></Field></div>
-          <div className="col-span-2"><Field label="집합장소"><TextInput value={requestForm.meetingPlace} onChange={(e) => setRequestForm({ ...requestForm, meetingPlace: e.target.value })} /></Field></div>
-          <div className="col-span-2"><Field label="비고"><TextInput value={requestForm.memo} onChange={(e) => setRequestForm({ ...requestForm, memo: e.target.value })} /></Field></div>
-          <div className="col-span-6 flex justify-end"><Button onClick={saveRequest}>요청 저장</Button></div>
+          <div className="xl:col-span-2"><Field label="작업내용"><TextInput value={requestForm.taskDescription} onChange={(e) => setRequestForm({ ...requestForm, taskDescription: e.target.value })} /></Field></div>
+          <div className="xl:col-span-2"><Field label="집합장소"><TextInput value={requestForm.meetingPlace} onChange={(e) => setRequestForm({ ...requestForm, meetingPlace: e.target.value })} /></Field></div>
+          <div className="xl:col-span-2"><Field label="비고"><TextInput value={requestForm.memo} onChange={(e) => setRequestForm({ ...requestForm, memo: e.target.value })} /></Field></div>
+          <div className="xl:col-span-6 flex justify-end"><Button onClick={saveRequest}>요청 저장</Button></div>
         </div>
       </Panel>
 
@@ -1188,7 +1188,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
                 <Field label="배치 가능 근로자"><TextInput value={`${availableWorkers.length}명`} readOnly /></Field>
                 <div className="flex items-end"><Button variant="secondary" onClick={bulkSaveAssignments} className="w-full">실제 배치인원 저장</Button></div>
               </div>
-              <div className="grid grid-cols-4 gap-2 rounded-md bg-mint-50 p-3 text-sm font-bold">
+              <div className="grid grid-cols-1 gap-2 rounded-md bg-mint-50 p-3 text-sm font-bold sm:grid-cols-2 xl:grid-cols-4">
                 <span>실제 단가 {formatWon(assignmentForm.unitPrice)}</span>
                 <span>근로자 기준금액 {"deductionBaseAmount" in preview ? formatWon(preview.deductionBaseAmount) : "-"}</span>
                 <span>총공제 {formatWon(preview.deductionAmount)}</span>
@@ -1924,7 +1924,7 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
           <Field label="대표자"><TextInput value={data.companyInfo.companyRepresentative} onChange={(event) => updateCompanyInfo("companyRepresentative", event.target.value)} /></Field>
           <Field label="연락처"><TextInput value={data.companyInfo.companyPhone} onChange={(event) => updateCompanyInfo("companyPhone", event.target.value)} /></Field>
           <div className="lg:col-span-2"><Field label="주소"><TextInput value={data.companyInfo.companyAddress} onChange={(event) => updateCompanyInfo("companyAddress", event.target.value)} /></Field></div>
-          <div className="col-span-2 lg:col-span-3"><Field label="입금계좌/비고"><TextInput value={data.companyInfo.bankAccountText} onChange={(event) => updateCompanyInfo("bankAccountText", event.target.value)} /></Field></div>
+          <div className="xl:col-span-2 lg:col-span-3"><Field label="입금계좌/비고"><TextInput value={data.companyInfo.bankAccountText} onChange={(event) => updateCompanyInfo("bankAccountText", event.target.value)} /></Field></div>
         </div>
       </Panel>
 
@@ -2031,7 +2031,7 @@ function RulesView({ data, updateData }: { data: AppData; updateData: (data: App
               <option value="ISSUED">전자계산서(면세) 발행</option>
             </SelectInput>
           </Field>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <Field label="고용공제"><TextInput type="number" value={form.employmentInsurance} onChange={(e) => setMoney("employmentInsurance", Number(e.target.value))} /></Field>
             <Field label="건강보험"><TextInput type="number" value={form.healthInsurance} onChange={(e) => setMoney("healthInsurance", Number(e.target.value))} /></Field>
             <Field label="국민연금"><TextInput type="number" value={form.nationalPension} onChange={(e) => setMoney("nationalPension", Number(e.target.value))} /></Field>
@@ -2039,7 +2039,7 @@ function RulesView({ data, updateData }: { data: AppData; updateData: (data: App
           </div>
           <Field label="비고"><TextInput value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} /></Field>
           <div className="rounded-md bg-mint-50 p-3 text-sm font-bold text-navy-900">총공제액 {formatWon(form.deductionAmount)} / 최종 지급액 {formatWon(form.paymentAmount)}</div>
-          <div className="flex gap-2"><Button onClick={save}>저장</Button><Button variant="secondary" onClick={() => setForm(emptyRule)}>초기화</Button></div>
+          <div className="flex flex-wrap gap-2"><Button onClick={save}>저장</Button><Button variant="secondary" onClick={() => setForm(emptyRule)}>초기화</Button></div>
         </div>
       </Panel>
 
@@ -2242,7 +2242,7 @@ function WorkerFileField({
             <p>업로드일: {attachment?.uploadedAt || "-"}</p>
             {attachment?.originalFileName && <p className="truncate">??: {attachment.originalFileName}</p>}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={onDownload}>다운로드</Button>
             <Button variant="danger" onClick={onDelete}>??</Button>
           </div>

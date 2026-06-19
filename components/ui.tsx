@@ -2,10 +2,10 @@ import { Children, isValidElement, ReactElement, ReactNode } from "react";
 
 export function Panel({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-lg border border-navy-100 bg-white shadow-ledger">
+    <section className="min-w-0 rounded-lg border border-navy-100 bg-white shadow-ledger">
       <div className="flex min-h-14 flex-col items-start gap-2 border-b border-navy-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <h2 className="text-base font-bold text-navy-900">{title}</h2>
-        {actions && <div className="flex w-full flex-wrap gap-2 sm:w-auto">{actions}</div>}
+        {actions && <div className="flex w-full min-w-0 flex-wrap gap-2 sm:w-auto">{actions}</div>}
       </div>
       <div className="p-4 sm:p-5">{children}</div>
     </section>
@@ -38,7 +38,7 @@ export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-base outline-none focus:border-mint-500 focus:ring-2 focus:ring-mint-100 sm:min-h-10 sm:text-sm ${props.className ?? ""}`}
+      className={`min-h-11 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-base outline-none focus:border-mint-500 focus:ring-2 focus:ring-mint-100 sm:min-h-10 sm:text-sm ${props.className ?? ""}`}
     />
   );
 }
@@ -47,7 +47,7 @@ export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
   return (
     <textarea
       {...props}
-      className={`min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base outline-none focus:border-mint-500 focus:ring-2 focus:ring-mint-100 sm:min-h-20 sm:text-sm ${props.className ?? ""}`}
+      className={`min-h-24 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 py-2 text-base outline-none focus:border-mint-500 focus:ring-2 focus:ring-mint-100 sm:min-h-20 sm:text-sm ${props.className ?? ""}`}
     />
   );
 }
@@ -56,7 +56,7 @@ export function SelectInput(props: React.SelectHTMLAttributes<HTMLSelectElement>
   return (
     <select
       {...props}
-      className={`min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-base outline-none focus:border-mint-500 focus:ring-2 focus:ring-mint-100 sm:min-h-10 sm:text-sm ${props.className ?? ""}`}
+      className={`min-h-11 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-base outline-none focus:border-mint-500 focus:ring-2 focus:ring-mint-100 sm:min-h-10 sm:text-sm ${props.className ?? ""}`}
     />
   );
 }
@@ -75,7 +75,7 @@ export function Button({
   return (
     <button
       {...props}
-      className={`min-h-11 rounded-md px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:px-3 ${variants[variant]} ${props.className ?? ""}`}
+      className={`min-h-11 max-w-full min-w-0 whitespace-normal rounded-md px-4 py-2 text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:px-3 ${variants[variant]} ${props.className ?? ""}`}
     >
       {children}
     </button>
@@ -84,7 +84,7 @@ export function Button({
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="grid gap-1 text-sm font-semibold text-slate-600">
+    <label className="grid min-w-0 gap-1 text-sm font-semibold leading-5 text-slate-600">
       {label}
       {children}
     </label>

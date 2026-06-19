@@ -4,7 +4,7 @@ import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
 import { STORAGE_KEY, loadAppData, migrateAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
-import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, ViewKey, WorkAssignment, WorkRequest, Worker } from "@/lib/types";
+import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
 
 const menus: Array<{ key: ViewKey; label: string }> = [
@@ -15,8 +15,20 @@ const menus: Array<{ key: ViewKey; label: string }> = [
   { key: "settlement", label: "월말 정산" },
   { key: "receivables", label: "전체 미수금 관리" },
   { key: "journal", label: "근로자 개인일지" },
-  { key: "rules", label: "계산기준 관리" }
+  { key: "rules", label: "계산기준 관리" },
+  { key: "settings", label: "설정" }
 ];
+
+const roleLabels: Record<UserRole, string> = {
+  ADMIN: "관리자",
+  USER: "일반사용자"
+};
+
+function canAccessMenu(data: AppData, viewKey: ViewKey) {
+  const role = data.accessControl?.currentRole || "ADMIN";
+  const permission = data.accessControl?.menuPermissions.find((item) => item.viewKey === viewKey);
+  return role === "ADMIN" ? permission?.admin !== false : Boolean(permission?.user);
+}
 
 const today = "2026-06-19";
 const currentMonth = monthKey(new Date());
@@ -177,6 +189,14 @@ export default function Home() {
   }
 
   const updateData = (next: AppData) => setData(next);
+  const permittedMenus = menus.filter((menu) => canAccessMenu(data, menu.key));
+
+  const changeRole = (role: UserRole) => {
+    const accessControl = data.accessControl;
+    const firstMenu = menus.find((menu) => canAccessMenu({ ...data, accessControl: { ...accessControl, currentRole: role } }, menu.key));
+    setData({ ...data, accessControl: { ...accessControl, currentRole: role } });
+    if (firstMenu && !canAccessMenu({ ...data, accessControl: { ...accessControl, currentRole: role } }, view)) setView(firstMenu.key);
+  };
 
   const downloadJson = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -224,7 +244,7 @@ export default function Home() {
           <h1 className="mt-2 text-xl font-bold leading-tight">출역·노임 정산 도우미</h1>
         </div>
         <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-1">
-          {menus.map((menu) => (
+          {permittedMenus.map((menu) => (
             <button
               key={menu.key}
               onClick={() => setView(menu.key)}
@@ -241,10 +261,14 @@ export default function Home() {
       <section className="min-w-0 flex-1">
         <header className="flex flex-col gap-3 border-b border-navy-100 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between lg:h-20 lg:px-8 lg:py-0">
           <div>
-            <p className="text-sm font-semibold text-slate-500">현재 월</p>
+            <p className="text-sm font-semibold text-slate-500">현재 월 · {roleLabels[data.accessControl?.currentRole || "ADMIN"]}</p>
             <p className="text-xl font-bold text-navy-900">{selectedMonth}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <SelectInput value={data.accessControl?.currentRole || "ADMIN"} onChange={(event) => changeRole(event.target.value as UserRole)} className="w-32">
+              <option value="ADMIN">관리자</option>
+              <option value="USER">일반사용자</option>
+            </SelectInput>
             <input
               type="file"
               accept="application/json"
@@ -270,6 +294,7 @@ export default function Home() {
           {view === "receivables" && <ReceivablesView data={data} updateData={updateData} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />}
           {view === "journal" && <WorkerJournalView data={data} />}
           {view === "rules" && <RulesView data={data} updateData={updateData} />}
+          {view === "settings" && <SettingsView data={data} updateData={updateData} />}
         </div>
       </section>
     </main>
@@ -1435,6 +1460,7 @@ function StatementDocument({ data, entries, client, site, selectedMonth }: { dat
     <PrintPage title="거래명세서" subtitle={`${client.name} / ${site.siteName} / ${getClosingPeriodLabel(selectedMonth)}`}>
       <table className="mb-4 w-full border-collapse text-sm"><tbody>
         <tr><th className={printTh}>공급자</th><td className={printTd}>{data.companyInfo.companyName}</td><th className={printTh}>거래처</th><td className={printTd}>{client.name}</td></tr>
+        <tr><th className={printTh}>사업자번호</th><td className={printTd}>{data.companyInfo.businessNumber}</td><th className={printTh}>연락처</th><td className={printTd}>{data.companyInfo.companyPhone}</td></tr>
         <tr><th className={printTh}>현장명</th><td className={printTd}>{site.siteName}</td><th className={printTh}>계산서</th><td className={printTd}>{site.invoiceIssueType === "ISSUED" ? `발행 / 수수료율 ${Math.round((site.invoiceDeductionRate ?? 0) * 100)}%` : "미발행"}</td></tr>
         <tr><th className={printTh}>마감일</th><td className={printTd}>{site.closingDay}일</td><th className={printTh}>결제일</th><td className={printTd}>{site.paymentDay}일</td></tr>
       </tbody></table>
@@ -1471,7 +1497,7 @@ function DelegationDocument({ data, entries, site, selectedMonth }: { data: AppD
       <div className="space-y-3 text-sm leading-7">
         <p>아래 근로자는 해당 현장의 일용노무비 수령 및 정산자료 제출 업무를 {data.companyInfo.companyName}에 위임합니다.</p>
         <p><b>회사명</b> {data.companyInfo.companyName} / <b>대표자</b> {data.companyInfo.companyRepresentative} / <b>사업자번호</b> {data.companyInfo.businessNumber}</p>
-        <p><b>주소</b> {data.companyInfo.companyAddress}</p>
+        <p><b>주소</b> {data.companyInfo.companyAddress} / <b>연락처</b> {data.companyInfo.companyPhone}</p>
       </div>
       <table className="mt-5 w-full border-collapse text-sm"><thead><tr>{["성명", "주민등록번호", "주소", "지급액", "서명/도장"].map((header) => <th key={header} className={printTh}>{header}</th>)}</tr></thead><tbody>
         {workerGroups.map((items) => {
@@ -1848,6 +1874,67 @@ function WorkerJournalView({ data }: { data: AppData }) {
                 </tr>
               ))}
               {rows.length === 0 && <tr><td className={td} colSpan={10}>조회된 근무이력이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </DataTable>
+      </Panel>
+    </div>
+  );
+}
+
+function SettingsView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
+  const updateCompanyInfo = (key: keyof AppData["companyInfo"], value: string) => {
+    updateData({ ...data, companyInfo: { ...data.companyInfo, [key]: value } });
+  };
+
+  const updatePermission = (viewKey: ViewKey, role: UserRole, checked: boolean) => {
+    const accessControl = data.accessControl;
+    updateData({
+      ...data,
+      accessControl: {
+        ...accessControl,
+        menuPermissions: accessControl.menuPermissions.map((permission) =>
+          permission.viewKey === viewKey ? { ...permission, [role === "ADMIN" ? "admin" : "user"]: checked } : permission
+        )
+      }
+    });
+  };
+
+  const accessControl = data.accessControl;
+
+  return (
+    <div className="space-y-5">
+      <Panel title="회사 기본정보 관리">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <Field label="업체명"><TextInput value={data.companyInfo.companyName} onChange={(event) => updateCompanyInfo("companyName", event.target.value)} /></Field>
+          <Field label="사업자번호"><TextInput value={data.companyInfo.businessNumber} onChange={(event) => updateCompanyInfo("businessNumber", event.target.value)} /></Field>
+          <Field label="대표자"><TextInput value={data.companyInfo.companyRepresentative} onChange={(event) => updateCompanyInfo("companyRepresentative", event.target.value)} /></Field>
+          <Field label="연락처"><TextInput value={data.companyInfo.companyPhone} onChange={(event) => updateCompanyInfo("companyPhone", event.target.value)} /></Field>
+          <div className="lg:col-span-2"><Field label="주소"><TextInput value={data.companyInfo.companyAddress} onChange={(event) => updateCompanyInfo("companyAddress", event.target.value)} /></Field></div>
+          <div className="col-span-2 lg:col-span-3"><Field label="입금계좌/비고"><TextInput value={data.companyInfo.bankAccountText} onChange={(event) => updateCompanyInfo("bankAccountText", event.target.value)} /></Field></div>
+        </div>
+      </Panel>
+
+      <Panel title="역할 및 메뉴 접근 권한">
+        <div className="mb-3 grid grid-cols-3 gap-3 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900">
+          <span>현재 역할: {roleLabels[accessControl.currentRole]}</span>
+          <span>관리자: 전체 업무 권한 기준</span>
+          <span>일반사용자: 체크된 메뉴만 표시</span>
+        </div>
+        <DataTable>
+          <table className="w-full border-collapse">
+            <thead><tr>{["메뉴", "관리자 접근", "일반사용자 접근"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+            <tbody>
+              {menus.map((menu) => {
+                const permission = accessControl.menuPermissions.find((item) => item.viewKey === menu.key);
+                return (
+                  <tr key={menu.key}>
+                    <td className={td}>{menu.label}</td>
+                    <td className={td}><input type="checkbox" checked={permission?.admin !== false} onChange={(event) => updatePermission(menu.key, "ADMIN", event.target.checked)} /></td>
+                    <td className={td}><input type="checkbox" checked={Boolean(permission?.user)} onChange={(event) => updatePermission(menu.key, "USER", event.target.checked)} /></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </DataTable>
@@ -2296,7 +2383,7 @@ function buildReceiptRows(entries: WorkAssignment[], data: AppData, site: Site, 
 }
 
 function buildDelegationRows(entries: WorkAssignment[], data: AppData, site: Site, selectedMonth: string) {
-  const rows: Array<Array<string | number>> = [["위임장"], ["회사명", data.companyInfo.companyName, "대표자", data.companyInfo.companyRepresentative], ["사업자등록번호", data.companyInfo.businessNumber, "주소", data.companyInfo.companyAddress], ["현장명", site.siteName, "정산기간", getClosingPeriodLabel(selectedMonth)], ["성명", "주민등록번호", "주소", "지급액", "서명/도장"]];
+  const rows: Array<Array<string | number>> = [["위임장"], ["회사명", data.companyInfo.companyName, "대표자", data.companyInfo.companyRepresentative], ["사업자등록번호", data.companyInfo.businessNumber, "연락처", data.companyInfo.companyPhone], ["주소", data.companyInfo.companyAddress], ["현장명", site.siteName, "정산기간", getClosingPeriodLabel(selectedMonth)], ["성명", "주민등록번호", "주소", "지급액", "서명/도장"]];
   getWorkerGroups(entries).forEach((items) => {
     const worker = data.workers.find((item) => item.id === items[0].workerId);
     const total = getWorkerTotal(items, data);

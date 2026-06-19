@@ -203,11 +203,25 @@ export interface CalculationRule {
   memo: string;
 }
 
+export type UserRole = "ADMIN" | "USER";
+
+export interface MenuPermission {
+  viewKey: ViewKey;
+  admin: boolean;
+  user: boolean;
+}
+
+export interface AccessControl {
+  currentRole: UserRole;
+  menuPermissions: MenuPermission[];
+}
+
 export interface CompanyInfo {
   companyName: string;
   companyAddress: string;
   companyRepresentative: string;
   businessNumber: string;
+  companyPhone: string;
   bankAccountText: string;
 }
 
@@ -231,7 +245,8 @@ export interface AppData {
   assignments: WorkAssignment[];
   calculationRules: CalculationRule[];
   companyInfo: CompanyInfo;
+  accessControl: AccessControl;
   receivablePayments: ReceivablePayment[];
 }
 
-export type ViewKey = "dashboard" | "workers" | "clients" | "attendance" | "settlement" | "receivables" | "journal" | "rules";
+export type ViewKey = "dashboard" | "workers" | "clients" | "attendance" | "settlement" | "receivables" | "journal" | "rules" | "settings";

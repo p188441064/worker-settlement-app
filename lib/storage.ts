@@ -215,6 +215,31 @@ function convertEntriesToRequestsAndAssignments(data: AppData, entries: WorkEntr
   return { requests, assignments };
 }
 
+function migrateCompanyInfo(companyInfo: Partial<AppData["companyInfo"]> | undefined): AppData["companyInfo"] {
+  return {
+    ...sampleData.companyInfo,
+    ...(companyInfo || {}),
+    companyName: companyInfo?.companyName || sampleData.companyInfo.companyName,
+    companyAddress: companyInfo?.companyAddress || sampleData.companyInfo.companyAddress,
+    companyRepresentative: companyInfo?.companyRepresentative || sampleData.companyInfo.companyRepresentative,
+    businessNumber: companyInfo?.businessNumber || sampleData.companyInfo.businessNumber,
+    companyPhone: companyInfo?.companyPhone || sampleData.companyInfo.companyPhone || "",
+    bankAccountText: companyInfo?.bankAccountText || sampleData.companyInfo.bankAccountText
+  };
+}
+
+function migrateAccessControl(accessControl: Partial<AppData["accessControl"]> | undefined): AppData["accessControl"] {
+  const samplePermissions = sampleData.accessControl.menuPermissions;
+  const incoming = accessControl?.menuPermissions || [];
+  return {
+    currentRole: accessControl?.currentRole || "ADMIN",
+    menuPermissions: samplePermissions.map((permission) => ({
+      ...permission,
+      ...(incoming.find((item) => item.viewKey === permission.viewKey) || {})
+    }))
+  };
+}
+
 export function migrateAppData(partial: Partial<AppData>): AppData {
   const clients = (partial.clients?.length ? partial.clients : sampleData.clients).map(migrateClient);
   const workers = (partial.workers?.length ? partial.workers : sampleData.workers).map(migrateWorker);
@@ -232,7 +257,8 @@ export function migrateAppData(partial: Partial<AppData>): AppData {
     workRequests: partial.workRequests || [],
     assignments: partial.assignments || [],
     calculationRules,
-    companyInfo: partial.companyInfo || sampleData.companyInfo,
+    companyInfo: migrateCompanyInfo(partial.companyInfo),
+    accessControl: migrateAccessControl(partial.accessControl),
     receivablePayments: partial.receivablePayments || []
   };
   if (!data.workRequests.length && !data.assignments.length && data.workEntries.length) {

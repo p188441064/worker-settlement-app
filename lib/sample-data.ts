@@ -153,7 +153,22 @@ export const sampleData: AppData = {
     companyAddress: "서울시 샘플구 샘플로 00",
     companyRepresentative: "홍길동",
     businessNumber: "000-00-00000",
+    companyPhone: "02-0000-0000",
     bankAccountText: "샘플은행 000-000000-00-000 예금주: 주식회사 샘플인력"
+  },
+  accessControl: {
+    currentRole: "ADMIN",
+    menuPermissions: [
+      { viewKey: "dashboard", admin: true, user: true },
+      { viewKey: "workers", admin: true, user: true },
+      { viewKey: "clients", admin: true, user: true },
+      { viewKey: "attendance", admin: true, user: true },
+      { viewKey: "settlement", admin: true, user: false },
+      { viewKey: "receivables", admin: true, user: false },
+      { viewKey: "journal", admin: true, user: true },
+      { viewKey: "rules", admin: true, user: false },
+      { viewKey: "settings", admin: true, user: false }
+    ]
   },
   receivablePayments: [
     { id: "rp-001", clientId: "c-001", siteId: "s-001", closingMonth: "2026-06", amount: 300000, paymentDate: "2026-06-20", memo: "샘플 부분입금" }

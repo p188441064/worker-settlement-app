@@ -798,6 +798,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
   });
   const [selectedRequestId, setSelectedRequestId] = useState(data.workRequests[0]?.id ?? "");
   const [workerQuery, setWorkerQuery] = useState("");
+  const [bulkAssignCount, setBulkAssignCount] = useState(1);
   const [assignmentForm, setAssignmentForm] = useState({
     workerId: "",
     unitPrice: data.workRequests[0]?.unitPrice ?? 150000,
@@ -816,7 +817,13 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
   const requests = normalizeRequestStatuses(data.workRequests, data.assignments).sort((a, b) => b.workDate.localeCompare(a.workDate));
   const selectedRequest = requests.find((request) => request.id === selectedRequestId) ?? requests[0];
   const selectedAssignments = selectedRequest ? data.assignments.filter((assignment) => assignment.requestId === selectedRequest.id && assignment.status !== "취소") : [];
-  const workers = data.workers.filter((worker) => [worker.name, worker.phone].join(" ").includes(workerQuery));
+  const selectedAssignedCount = selectedRequest ? getAssignedCount(selectedRequest.id, data.assignments) : 0;
+  const selectedShortageCount = selectedRequest ? Math.max(selectedRequest.requestedCount - selectedAssignedCount, 0) : 0;
+  const selectedAssignmentRate = selectedRequest && selectedRequest.requestedCount > 0 ? Math.round((selectedAssignedCount / selectedRequest.requestedCount) * 100) : 0;
+  const workers = data.workers.filter((worker) => [worker.name, worker.phone, worker.mobile].join(" ").includes(workerQuery));
+  const availableWorkers = selectedRequest
+    ? workers.filter((worker) => !data.assignments.some((assignment) => assignment.requestId === selectedRequest.id && assignment.workerId === worker.id && assignment.status !== "취소"))
+    : workers;
   const previewWorker = data.workers.find((worker) => worker.id === assignmentForm.workerId) ?? data.workers[0];
   const previewSite = selectedRequest ? data.sites.find((site) => site.id === selectedRequest.siteId) : undefined;
   const previewClient = selectedRequest ? data.clients.find((client) => client.id === selectedRequest.clientId) : undefined;
@@ -887,7 +894,9 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
   };
 
   const selectRequest = (request: WorkRequest) => {
+    const assigned = getAssignedCount(request.id, data.assignments);
     setSelectedRequestId(request.id);
+    setBulkAssignCount(Math.max(request.requestedCount - assigned, 1));
     setAssignmentForm({ workerId: "", unitPrice: request.unitPrice, workCount: 1, deductionType: request.deductionType, manualEmploymentInsurance: "", manualHealthInsurance: "", manualNationalPension: "", manualLongTermCare: "", manualDeductionAmount: "", manualPaymentAmount: "", manualReason: "", memo: "" });
   };
 
@@ -937,6 +946,44 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
     setAssignmentForm({ ...assignmentForm, workerId: "", manualEmploymentInsurance: "", manualHealthInsurance: "", manualNationalPension: "", manualLongTermCare: "", manualDeductionAmount: "", manualPaymentAmount: "", manualReason: "", memo: "" });
   };
 
+  const bulkSaveAssignments = () => {
+    if (!selectedRequest) return alert("요청건을 선택해 주세요.");
+    const site = data.sites.find((item) => item.id === selectedRequest.siteId);
+    const client = data.clients.find((item) => item.id === selectedRequest.clientId);
+    if (!site || !client) return alert("거래처, 현장 정보를 확인해 주세요.");
+    const targetCount = Math.max(Number(bulkAssignCount) || 0, 0);
+    if (targetCount <= 0) return alert("실제 배치인원을 입력해 주세요.");
+    const currentAssigned = getAssignedCount(selectedRequest.id, data.assignments);
+    if (currentAssigned + targetCount > selectedRequest.requestedCount && !confirm("배치인원이 요청인원보다 많습니다. 초과 배치로 저장할까요?")) return;
+    const candidates = availableWorkers.slice(0, targetCount);
+    if (candidates.length < targetCount) return alert("배치 가능한 근로자가 부족합니다. 검색 조건이나 근로자 목록을 확인해 주세요.");
+    let baseAssignments = data.assignments;
+    const newAssignments = candidates.map((worker, index) => {
+      const calculated = calculatePayrollDeduction({
+        worker,
+        site,
+        client,
+        requestId: selectedRequest.id,
+        workerId: worker.id,
+        workDate: selectedRequest.workDate,
+        clientId: selectedRequest.clientId,
+        siteId: selectedRequest.siteId,
+        taskDescription: selectedRequest.taskDescription,
+        unitPrice: assignmentForm.unitPrice,
+        workCount: assignmentForm.workCount,
+        deductionType: assignmentForm.deductionType,
+        existingAssignments: baseAssignments,
+        calculationRules: data.calculationRules
+      });
+      const assignment = { ...calculated, id: createId(`as${index}`), memo: assignmentForm.memo || "일괄 배치" };
+      baseAssignments = [...baseAssignments, assignment];
+      return assignment;
+    });
+    const assignments = [...data.assignments, ...newAssignments];
+    updateData({ ...data, assignments, workRequests: normalizeRequestStatuses(data.workRequests, assignments) });
+    setBulkAssignCount(Math.max(selectedRequest.requestedCount - currentAssigned - newAssignments.length, 1));
+  };
+
   const removeAssignment = (id: string) => {
     if (!confirm("배치내역을 삭제할까요?")) return;
     const assignments = data.assignments.filter((assignment) => assignment.id !== id);
@@ -976,18 +1023,27 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
               <p className="text-lg font-bold text-navy-900">{data.clients.find((client) => client.id === selectedRequest.clientId)?.name} / {data.sites.find((site) => site.id === selectedRequest.siteId)?.name}</p>
               <p className="mt-2">근무일: {selectedRequest.workDate}</p>
               <p>작업내용: {selectedRequest.taskDescription}</p>
-              <p>요청 {selectedRequest.requestedCount}명 / 배치 {getAssignedCount(selectedRequest.id, data.assignments)}명 / 부족 {Math.max(selectedRequest.requestedCount - getAssignedCount(selectedRequest.id, data.assignments), 0)}명</p>
+              <p>요청 {selectedRequest.requestedCount}명 / 배치 {selectedAssignedCount}명 / 부족 {selectedShortageCount}명</p>
+              <p>요청 대비 배치율: {selectedAssignmentRate}%</p>
               <p>집합장소: {selectedRequest.meetingPlace || "-"}</p>
-              <div className="mt-3"><StatusBadge status={getRequestStatus(selectedRequest, data.assignments)} /></div>
+              <div className="mt-3 flex flex-wrap gap-2"><StatusBadge status={getRequestStatus(selectedRequest, data.assignments)} /><Badge tone={selectedShortageCount > 0 ? "amber" : "mint"}>{selectedShortageCount > 0 ? `부족 ${selectedShortageCount}명` : "부족 없음"}</Badge></div>
             </div>
             <div className="grid gap-4">
               <div className="grid grid-cols-6 gap-3">
                 <Field label="근로자 검색"><TextInput value={workerQuery} onChange={(e) => setWorkerQuery(e.target.value)} placeholder="이름 또는 연락처" /></Field>
-                <Field label="근로자 선택"><SelectInput value={assignmentForm.workerId} onChange={(e) => setAssignmentForm({ ...assignmentForm, workerId: e.target.value })}><option value="">선택</option>{workers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name} ({worker.phone})</option>)}</SelectInput></Field>
+                <Field label="근로자 선택"><SelectInput value={assignmentForm.workerId} onChange={(e) => setAssignmentForm({ ...assignmentForm, workerId: e.target.value })}><option value="">선택</option>{availableWorkers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name} ({worker.mobile || worker.phone})</option>)}</SelectInput></Field>
                 <Field label="공수"><TextInput type="number" step="0.5" value={assignmentForm.workCount} onChange={(e) => setAssignmentForm({ ...assignmentForm, workCount: Number(e.target.value) })} /></Field>
                 <Field label="단가"><TextInput type="number" value={assignmentForm.unitPrice} onChange={(e) => setAssignmentForm({ ...assignmentForm, unitPrice: Number(e.target.value) })} /></Field>
                 <Field label="공제유형"><DeductionSelect value={assignmentForm.deductionType} onChange={(value) => setAssignmentForm({ ...assignmentForm, deductionType: value })} /></Field>
                 <div className="flex items-end"><Button onClick={saveAssignment} className="w-full">배치 저장</Button></div>
+              </div>
+              <div className="grid grid-cols-6 gap-3 rounded-md border border-navy-100 bg-white p-3">
+                <Field label="실제 배치인원"><TextInput type="number" min={1} value={bulkAssignCount} onChange={(e) => setBulkAssignCount(Number(e.target.value))} /></Field>
+                <Field label="현재 배치인원"><TextInput value={`${selectedAssignedCount}명`} readOnly /></Field>
+                <Field label="부족인원"><TextInput value={`${selectedShortageCount}명`} readOnly /></Field>
+                <Field label="배치율"><TextInput value={`${selectedAssignmentRate}%`} readOnly /></Field>
+                <Field label="배치 가능 근로자"><TextInput value={`${availableWorkers.length}명`} readOnly /></Field>
+                <div className="flex items-end"><Button variant="secondary" onClick={bulkSaveAssignments} className="w-full">실제 배치인원 저장</Button></div>
               </div>
               <div className="grid grid-cols-4 gap-2 rounded-md bg-mint-50 p-3 text-sm font-bold">
                 <span>실제 단가 {formatWon(assignmentForm.unitPrice)}</span>
@@ -1002,6 +1058,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
               <div className="rounded-md border border-navy-100 bg-white p-3 text-sm text-slate-700">
                 <p><b>나이구분</b> {previewWorker ? ageGroupLabel(getAgeGroupByWorkDate(previewWorker.birthDate, selectedRequest.workDate)) : "-"}</p>
                 <p><b>계산서 발행 여부</b> {"invoiceIssueType" in preview ? (preview.invoiceIssueType === "ISSUED" ? "계산서 발행" : "계산서 미발행") : "-"}</p>
+                <p><b>공제 적용 여부</b> {preview.deductionAmount > 0 ? "적용" : "미적용"}</p>
                 <p><b>적용규칙</b> {"appliedRuleLabel" in preview ? preview.appliedRuleLabel : "-"}</p>
                 <p><b>판단사유</b> {"deductionReason" in preview ? preview.deductionReason : "계산기준표 기준 공제액을 미리 계산합니다."}</p>
                 {"healthInsuranceReason" in preview && <p><b>건강보험</b> {preview.healthInsuranceReason}</p>}
@@ -1810,7 +1867,7 @@ function RequestTable({
   return (
     <DataTable>
       <table className="w-full border-collapse">
-        <thead><tr><th className={th}>근무일</th><th className={th}>거래처</th><th className={th}>현장</th><th className={th}>작업내용</th><th className={th}>요청</th><th className={th}>배치</th><th className={th}>부족</th><th className={th}>단가</th><th className={th}>상태</th></tr></thead>
+        <thead><tr><th className={th}>근무일</th><th className={th}>거래처</th><th className={th}>현장</th><th className={th}>작업내용</th><th className={th}>요청</th><th className={th}>배치</th><th className={th}>부족</th><th className={th}>배치율</th><th className={th}>단가</th><th className={th}>공제</th><th className={th}>상태</th></tr></thead>
         <tbody>
           {requests.map((request) => {
             const assigned = getAssignedCount(request.id, data.assignments);
@@ -1823,7 +1880,9 @@ function RequestTable({
               <td className={td}>{request.requestedCount}</td>
               <td className={td}>{assigned}</td>
               <td className={td}>{Math.max(request.requestedCount - assigned, 0)}</td>
+              <td className={td}>{request.requestedCount > 0 ? `${Math.round((assigned / request.requestedCount) * 100)}%` : "0%"}</td>
               <td className={td}>{formatWon(request.unitPrice)}</td>
+              <td className={td}>{request.deductionType}</td>
               <td className={td}><StatusBadge status={getRequestStatus(request, data.assignments)} /></td>
             </tr>
           )})}

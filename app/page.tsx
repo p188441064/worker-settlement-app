@@ -17,7 +17,8 @@ const menus: Array<{ key: ViewKey; label: string }> = [
   { key: "receivables", label: "전체 미수금 관리" },
   { key: "journal", label: "근로자 개인일지" },
   { key: "rules", label: "계산기준 관리" },
-  { key: "settings", label: "설정" }
+  { key: "settings", label: "설정" },
+  { key: "help", label: "도움말" }
 ];
 
 const roleLabels: Record<UserRole, string> = {
@@ -298,6 +299,7 @@ export default function Home() {
           {view === "journal" && <WorkerJournalView data={data} />}
           {view === "rules" && <RulesView data={data} updateData={updateData} />}
           {view === "settings" && <SettingsView data={data} updateData={updateData} />}
+          {view === "help" && <HelpView />}
         </div>
       </section>
     </main>
@@ -1980,6 +1982,117 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
             </tbody>
           </table>
         </DataTable>
+      </Panel>
+    </div>
+  );
+}
+
+function HelpView() {
+  const sections = [
+    {
+      title: "처음 사용하는 순서",
+      items: [
+        "설정에서 회사 기본정보와 권한 구조를 먼저 확인합니다.",
+        "거래현장 관리에서 거래처를 등록한 뒤, 해당 거래처의 현장을 추가합니다.",
+        "근로자 관리에서 근로자 기본정보와 필수 서류를 등록합니다.",
+        "요청·배치 입력에서 날짜별 요청인원과 실제 배치 근로자를 입력합니다.",
+        "월말 정산에서 현장별 정산자료를 확인하고 출력합니다.",
+        "전체 미수금 관리에서 청구/입금/미수 상태를 계속 확인합니다."
+      ]
+    },
+    {
+      title: "거래처/현장 등록",
+      items: [
+        "거래처 신규 버튼으로 업체명, 연락처, 이메일, 마감일, 결제일을 저장합니다.",
+        "거래처를 선택한 뒤 현장 신규 버튼으로 현장명, 담당자, 계산서 발행 여부를 저장합니다.",
+        "현장 기본 단가와 공제 유형은 요청·배치 입력 시 자동 기본값으로 사용됩니다.",
+        "좌측 트리에서 거래처를 누르면 하위 현장 목록이 표시되고, 현장을 누르면 상세정보를 수정할 수 있습니다."
+      ]
+    },
+    {
+      title: "근로자 등록 및 서류 업로드",
+      items: [
+        "근로자 이름, 생년월일, 연락처, 주소, 직종을 입력한 뒤 등록합니다.",
+        "신분증 앞면, 신분증 뒷면, 기초안전보건교육 이수증, 기타 첨부파일을 각각 업로드할 수 있습니다.",
+        "이미지 파일은 썸네일로 미리 볼 수 있고, 파일명/업로드일을 확인할 수 있습니다.",
+        "서류상태는 필수 서류 등록 여부에 따라 자동으로 완료/일부누락/미확인으로 판단됩니다.",
+        "도장/서명은 이름 기준으로 자동 생성되며 신상명세서 출력에 반영됩니다."
+      ]
+    },
+    {
+      title: "요청·배치 입력",
+      items: [
+        "요청건 등록에서 근무일, 거래처, 현장, 요청인원, 단가, 공제유형을 입력합니다.",
+        "요청건을 선택한 뒤 근로자를 선택해 실제 배치내역을 저장합니다.",
+        "배치인원, 부족인원, 요청 대비 배치율은 자동 계산됩니다.",
+        "일괄 배치는 실제 배치인원을 입력하면 가능한 근로자 목록에서 한 번에 배치합니다.",
+        "공제 판단 사유와 수동 공제 입력값은 배치 저장 전 미리 확인할 수 있습니다."
+      ]
+    },
+    {
+      title: "정산/마감/미수금 관리",
+      items: [
+        "월말 정산에서 정산월, 거래처, 현장을 선택하면 거래명세서와 지급명세서 자료가 생성됩니다.",
+        "마감자료 5종 엑셀 다운로드와 PDF/인쇄 미리보기를 사용할 수 있습니다.",
+        "전체 미수금 관리에서는 거래처별 청구금액, 입금금액, 미수금액, 결제예정일, 연체일수를 확인합니다.",
+        "부분입금은 입금액을 누적해 처리하고, 잔액이 0원이 되면 완납 상태로 표시됩니다.",
+        "대시보드에는 미수금 합계, 결제 예정 금액, 부족인원, 서류 미비 근로자 등이 연결됩니다."
+      ]
+    },
+    {
+      title: "백업/복원",
+      items: [
+        "상단 JSON 백업 버튼으로 현재 데이터를 파일로 내려받습니다.",
+        "JSON 불러오기 버튼으로 백업 파일을 복원할 수 있습니다.",
+        "첨부파일 Base64 데이터와 Supabase Storage 메타데이터도 백업 데이터에 포함됩니다.",
+        "샘플 데이터 생성은 테스트용이며, 운영 데이터가 있는 경우 사용 전 백업을 권장합니다.",
+        "localStorage 초기화는 현재 브라우저의 로컬 데이터를 지우므로 신중히 사용합니다."
+      ]
+    },
+    {
+      title: "모바일 사용 안내",
+      items: [
+        "모바일에서는 입력폼이 1열 카드형으로 표시됩니다.",
+        "표는 모바일에서 카드 리스트로 바뀌며, 상세정보를 눌러 숨은 항목을 확인합니다.",
+        "출력물 미리보기는 PC/A4 기준 레이아웃을 유지하므로 최종 인쇄는 PC 사용을 권장합니다.",
+        "첨부파일 업로드는 휴대폰 카메라/앨범 파일 선택을 사용할 수 있습니다.",
+        "긴 버튼과 라벨은 줄바꿈되므로 화면을 가로로 밀지 않고 세로 스크롤로 사용합니다."
+      ]
+    }
+  ];
+
+  return (
+    <div className="space-y-5">
+      <Panel title="운영자 사용 가이드">
+        <div className="rounded-md bg-navy-50 p-4 text-sm leading-7 text-navy-900">
+          <p className="font-bold">이 화면은 처음 사용하는 운영자가 업무 순서대로 앱을 설정하고 운용할 수 있도록 만든 도움말입니다.</p>
+          <p className="mt-1 text-slate-600">운영 전에는 회사정보, 거래처/현장, 근로자 서류, 백업 상태를 먼저 확인해 주세요.</p>
+        </div>
+      </Panel>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {sections.map((section, index) => (
+          <Panel key={section.title} title={`${index + 1}. ${section.title}`}>
+            <ol className="space-y-2 text-sm leading-6 text-slate-700">
+              {section.items.map((item, itemIndex) => (
+                <li key={itemIndex} className="rounded-md border border-navy-100 bg-white px-3 py-2">
+                  {item}
+                </li>
+              ))}
+            </ol>
+          </Panel>
+        ))}
+      </div>
+
+      <Panel title="운영 전 체크리스트">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {["회사정보 저장", "거래처/현장 등록", "근로자 서류 확인", "JSON 백업 다운로드", "요청/배치 입력 테스트", "정산자료 출력 테스트", "미수금 상태 확인", "모바일 화면 확인"].map((item) => (
+            <label key={item} className="flex min-h-11 items-center gap-2 rounded-md border border-navy-100 px-3 text-sm font-semibold text-slate-700">
+              <input type="checkbox" />
+              {item}
+            </label>
+          ))}
+        </div>
       </Panel>
     </div>
   );

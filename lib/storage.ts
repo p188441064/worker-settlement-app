@@ -277,6 +277,7 @@ function migrateAccessControl(accessControl: Partial<AppData["accessControl"]> |
   const incoming = accessControl?.menuPermissions || [];
   return {
     currentRole: accessControl?.currentRole || "ADMIN",
+    sensitiveProtectionEnabled: accessControl?.sensitiveProtectionEnabled ?? sampleData.accessControl.sensitiveProtectionEnabled ?? false,
     menuPermissions: samplePermissions.map((permission) => ({
       ...permission,
       ...(incoming.find((item) => item.viewKey === permission.viewKey) || {})

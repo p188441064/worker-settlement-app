@@ -158,16 +158,17 @@ export const sampleData: AppData = {
   },
   accessControl: {
     currentRole: "ADMIN",
+    sensitiveProtectionEnabled: false,
     menuPermissions: [
-      { viewKey: "dashboard", admin: true, user: true },
-      { viewKey: "workers", admin: true, user: true },
-      { viewKey: "clients", admin: true, user: true },
-      { viewKey: "attendance", admin: true, user: true },
-      { viewKey: "settlement", admin: true, user: false },
-      { viewKey: "receivables", admin: true, user: false },
-      { viewKey: "journal", admin: true, user: true },
-      { viewKey: "rules", admin: true, user: false },
-      { viewKey: "settings", admin: true, user: false }
+      { viewKey: "dashboard", admin: true, user: true, sensitive: false },
+      { viewKey: "workers", admin: true, user: true, sensitive: true },
+      { viewKey: "clients", admin: true, user: true, sensitive: false },
+      { viewKey: "attendance", admin: true, user: true, sensitive: false },
+      { viewKey: "settlement", admin: true, user: false, sensitive: true },
+      { viewKey: "receivables", admin: true, user: false, sensitive: true },
+      { viewKey: "journal", admin: true, user: true, sensitive: true },
+      { viewKey: "rules", admin: true, user: false, sensitive: true },
+      { viewKey: "settings", admin: true, user: false, sensitive: true }
     ]
   },
   receivablePayments: [

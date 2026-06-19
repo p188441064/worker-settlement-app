@@ -226,11 +226,13 @@ export interface MenuPermission {
   viewKey: ViewKey;
   admin: boolean;
   user: boolean;
+  sensitive?: boolean;
 }
 
 export interface AccessControl {
   currentRole: UserRole;
   menuPermissions: MenuPermission[];
+  sensitiveProtectionEnabled?: boolean;
 }
 
 export interface CompanyInfo {

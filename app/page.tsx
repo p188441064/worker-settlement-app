@@ -28,6 +28,7 @@ const roleLabels: Record<UserRole, string> = {
 function canAccessMenu(data: AppData, viewKey: ViewKey) {
   const role = data.accessControl?.currentRole || "ADMIN";
   const permission = data.accessControl?.menuPermissions.find((item) => item.viewKey === viewKey);
+  if (role !== "ADMIN" && data.accessControl?.sensitiveProtectionEnabled && permission?.sensitive) return false;
   return role === "ADMIN" ? permission?.admin !== false : Boolean(permission?.user);
 }
 
@@ -1446,14 +1447,20 @@ function getDocumentStatusLabel(worker?: Worker) {
   return worker ? getWorkerDocumentStatus(worker) : "미등록";
 }
 
-function PrintPage({ title, subtitle, orientation = "portrait", children }: { title: string; subtitle?: string; orientation?: "portrait" | "landscape"; children: ReactNode }) {
+function PrintPage({ title, subtitle, orientation = "portrait", companyInfo, children }: { title: string; subtitle?: string; orientation?: "portrait" | "landscape"; companyInfo?: AppData["companyInfo"]; children: ReactNode }) {
   return (
     <section className={`print-page print-paper ${orientation === "landscape" ? "print-landscape" : ""}`}>
       <div className="mb-5 border-b-2 border-slate-900 pb-3 text-center">
+        {companyInfo && <p className="mb-1 text-xs font-semibold text-slate-500">{companyInfo.companyName} ? {companyInfo.businessNumber} ? {companyInfo.companyPhone}</p>}
         <h2 className="text-2xl font-black tracking-normal">{title}</h2>
         {subtitle && <p className="mt-1 text-sm font-semibold text-slate-600">{subtitle}</p>}
       </div>
       {children}
+      {companyInfo && (
+        <div className="mt-6 border-t border-slate-300 pt-2 text-[11px] text-slate-500">
+          {companyInfo.companyName} / ?? {companyInfo.companyRepresentative} / {companyInfo.companyAddress} / {companyInfo.bankAccountText}
+        </div>
+      )}
     </section>
   );
 }
@@ -1913,6 +1920,23 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
     });
   };
 
+  const updateSensitivePermission = (viewKey: ViewKey, checked: boolean) => {
+    const accessControl = data.accessControl;
+    updateData({
+      ...data,
+      accessControl: {
+        ...accessControl,
+        menuPermissions: accessControl.menuPermissions.map((permission) =>
+          permission.viewKey === viewKey ? { ...permission, sensitive: checked } : permission
+        )
+      }
+    });
+  };
+
+  const updateSensitiveProtection = (checked: boolean) => {
+    updateData({ ...data, accessControl: { ...data.accessControl, sensitiveProtectionEnabled: checked } });
+  };
+
   const accessControl = data.accessControl;
 
   return (
@@ -1929,14 +1953,18 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
       </Panel>
 
       <Panel title="역할 및 메뉴 접근 권한">
-        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900">
-          <span>현재 역할: {roleLabels[accessControl.currentRole]}</span>
-          <span>관리자: 전체 업무 권한 기준</span>
-          <span>일반사용자: 체크된 메뉴만 표시</span>
+        <div className="mb-3 grid grid-cols-1 gap-3 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900 sm:grid-cols-3">
+          <span>?? ??: {roleLabels[accessControl.currentRole]}</span>
+          <span>???: ?? ?? ?? ??</span>
+          <span>?????: ??? ??? ??</span>
         </div>
+        <label className="mb-3 flex min-h-11 items-center gap-2 rounded-md border border-navy-100 bg-white px-3 text-sm font-semibold text-slate-700">
+          <input type="checkbox" checked={Boolean(accessControl.sensitiveProtectionEnabled)} onChange={(event) => updateSensitiveProtection(event.target.checked)} />
+          ???? ?? ?? ??
+        </label>
         <DataTable>
           <table className="w-full border-collapse">
-            <thead><tr>{["메뉴", "관리자 접근", "일반사용자 접근"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+            <thead><tr>{["??", "??? ??", "????? ??", "????"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
             <tbody>
               {menus.map((menu) => {
                 const permission = accessControl.menuPermissions.find((item) => item.viewKey === menu.key);
@@ -1945,6 +1973,7 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
                     <td className={td}>{menu.label}</td>
                     <td className={td}><input type="checkbox" checked={permission?.admin !== false} onChange={(event) => updatePermission(menu.key, "ADMIN", event.target.checked)} /></td>
                     <td className={td}><input type="checkbox" checked={Boolean(permission?.user)} onChange={(event) => updatePermission(menu.key, "USER", event.target.checked)} /></td>
+                    <td className={td}><input type="checkbox" checked={Boolean(permission?.sensitive)} onChange={(event) => updateSensitivePermission(menu.key, event.target.checked)} /></td>
                   </tr>
                 );
               })}

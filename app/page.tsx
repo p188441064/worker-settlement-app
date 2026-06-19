@@ -4,7 +4,8 @@ import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
 import { STORAGE_KEY, loadAppData, migrateAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
-import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker } from "@/lib/types";
+import { createWorkerAttachmentFromFile, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
+import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
 
 const menus: Array<{ key: ViewKey; label: string }> = [
@@ -52,7 +53,8 @@ const emptyWorker: Worker = {
   documentStatus: "미확인",
   memo: "",
   signatureStyle: "STAMP",
-  signatureDataUrl: ""
+  signatureDataUrl: "",
+  attachments: []
 };
 
 const emptyClient: Client = {
@@ -502,11 +504,13 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
 
   const save = () => {
     if (!form.name.trim()) return alert("근로자명을 입력해 주세요.");
+    const workerId = form.id || createId("w");
     const worker = {
       ...form,
-      id: form.id || createId("w"),
+      id: workerId,
       workerCode: form.workerCode || `W-${String(data.workers.length + 1).padStart(4, "0")}`,
       phone: form.mobile || form.phone,
+      attachments: (form.attachments || []).map((attachment) => ({ ...attachment, workerId })),
       documentStatus: getWorkerDocumentStatus(form),
       signatureDataUrl: form.signatureDataUrl || createSignatureDataUrl(form.name, form.signatureStyle)
     };
@@ -520,26 +524,29 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
     updateWorkerForm({ ...form, residentNumber, birthDate, ageGroup: getAgeGroupByWorkDate(birthDate, today) });
   };
 
-  const setFile = (key: keyof Pick<Worker, "idCardFrontImage" | "idCardBackImage" | "safetyCertificateImage" | "otherAttachment">, file?: File) => {
+  const setFile = async (kind: WorkerDocumentKind, file?: File) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      updateWorkerForm({ ...form, [key]: String(reader.result) } as Worker);
-    };
-    reader.readAsDataURL(file);
+    const attachment = await createWorkerAttachmentFromFile({ ...form, id: form.id || "draft-worker" }, kind, file);
+    updateWorkerForm(upsertWorkerAttachment(form, attachment));
   };
 
-  const deleteFile = (key: keyof Pick<Worker, "idCardFrontImage" | "idCardBackImage" | "safetyCertificateImage" | "otherAttachment">) => {
-    const next = { ...form, [key]: undefined } as Worker;
-    updateWorkerForm(next);
+  const deleteFile = (kind: WorkerDocumentKind) => {
+    updateWorkerForm(removeWorkerAttachment(form, kind));
   };
 
-  const downloadFile = (dataUrl?: string, filename = "attachment") => {
+  const downloadFile = (kind: WorkerDocumentKind) => {
+    const attachment = getWorkerAttachment(form, kind);
+    const dataUrl = attachment?.dataUrl || getWorkerDocumentDataUrl(form, kind);
     if (!dataUrl) return;
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = filename;
-    link.click();
+    downloadDataUrl(dataUrl, attachment?.fileName || `${form.name || "근로자"}_${workerDocumentLabels[kind]}.png`);
+  };
+
+  const downloadSelectedWorkerFiles = () => {
+    if (!downloadWorkerAttachments(form)) alert("다운로드할 첨부파일이 없습니다.");
+  };
+
+  const downloadAllWorkerFiles = () => {
+    if (!downloadAttachmentsZip(data.workers, `전체근로자_첨부파일_${today}.zip`)) alert("ZIP으로 다운로드할 첨부파일이 없습니다.");
   };
 
   const printWorkerDocument = () => {
@@ -584,10 +591,10 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
             <span>완료 기준: 신분증 앞면, 신분증 뒷면, 이수증이 모두 등록되어야 합니다.</span>
             <span>현재 상태: {getWorkerDocumentStatus(form)}</span>
           </div>
-          <WorkerFileField label="신분증 앞면" value={form.idCardFrontImage} onChange={(file) => setFile("idCardFrontImage", file)} onDelete={() => deleteFile("idCardFrontImage")} onDownload={() => downloadFile(form.idCardFrontImage, `${form.name}_신분증앞면.png`)} />
-          <WorkerFileField label="신분증 뒷면" value={form.idCardBackImage} onChange={(file) => setFile("idCardBackImage", file)} onDelete={() => deleteFile("idCardBackImage")} onDownload={() => downloadFile(form.idCardBackImage, `${form.name}_신분증뒷면.png`)} />
-          <WorkerFileField label="기초안전보건교육 이수증" value={form.safetyCertificateImage} onChange={(file) => setFile("safetyCertificateImage", file)} onDelete={() => deleteFile("safetyCertificateImage")} onDownload={() => downloadFile(form.safetyCertificateImage, `${form.name}_이수증.png`)} />
-          <WorkerFileField label="기타 첨부파일" value={form.otherAttachment} onChange={(file) => setFile("otherAttachment", file)} onDelete={() => deleteFile("otherAttachment")} onDownload={() => downloadFile(form.otherAttachment, `${form.name}_기타첨부.png`)} />
+          <WorkerFileField label="신분증 앞면" attachment={getWorkerAttachment(form, "ID_FRONT")} value={getWorkerDocumentDataUrl(form, "ID_FRONT")} onChange={(file) => setFile("ID_FRONT", file)} onDelete={() => deleteFile("ID_FRONT")} onDownload={() => downloadFile("ID_FRONT")} />
+          <WorkerFileField label="신분증 뒷면" attachment={getWorkerAttachment(form, "ID_BACK")} value={getWorkerDocumentDataUrl(form, "ID_BACK")} onChange={(file) => setFile("ID_BACK", file)} onDelete={() => deleteFile("ID_BACK")} onDownload={() => downloadFile("ID_BACK")} />
+          <WorkerFileField label="기초안전보건교육 이수증" attachment={getWorkerAttachment(form, "SAFETY_CERTIFICATE")} value={getWorkerDocumentDataUrl(form, "SAFETY_CERTIFICATE")} onChange={(file) => setFile("SAFETY_CERTIFICATE", file)} onDelete={() => deleteFile("SAFETY_CERTIFICATE")} onDownload={() => downloadFile("SAFETY_CERTIFICATE")} />
+          <WorkerFileField label="기타 첨부파일" attachment={getWorkerAttachment(form, "OTHER")} value={getWorkerDocumentDataUrl(form, "OTHER")} accept="*/*" onChange={(file) => setFile("OTHER", file)} onDelete={() => deleteFile("OTHER")} onDownload={() => downloadFile("OTHER")} />
           <Field label="서명 스타일"><SelectInput value={form.signatureStyle} onChange={(e) => updateWorkerForm({ ...form, signatureStyle: e.target.value as Worker["signatureStyle"], signatureDataUrl: createSignatureDataUrl(form.name, e.target.value as Worker["signatureStyle"]) })}><option value="STAMP">막도장</option><option value="SIGN">전자서명</option></SelectInput></Field>
           <div className="rounded-md border border-navy-100 p-2">
             {form.signatureDataUrl ? <img src={form.signatureDataUrl} alt="서명 미리보기" className="h-20" /> : <p className="mb-2 text-xs text-slate-400">이름 입력 후 자동 생성됩니다.</p>}
@@ -1526,7 +1533,7 @@ function ReceiptDocuments({ data, entries, site, selectedMonth }: { data: AppDat
         </tbody></table>
         <p className="mb-8 text-sm leading-7">상기 금액을 해당 기간 동안의 일용노무비로 정히 수령하였음을 확인합니다.</p>
         <div className="flex items-end justify-end gap-6"><span>수령인: {worker?.name}</span>{worker?.signatureDataUrl && <img src={worker.signatureDataUrl} alt="서명" className="h-20 w-28 object-contain" />}</div>
-        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2"><DocumentImage title="신분증 앞면" value={worker?.idCardFrontImage} /><DocumentImage title="신분증 뒷면" value={worker?.idCardBackImage} /></div>
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2"><DocumentImage title="신분증 앞면" value={worker ? getWorkerDocumentDataUrl(worker, "ID_FRONT") : undefined} /><DocumentImage title="신분증 뒷면" value={worker ? getWorkerDocumentDataUrl(worker, "ID_BACK") : undefined} /></div>
       </PrintPage>
     );
   })}</>;
@@ -1546,7 +1553,7 @@ function WorkerProfileDocuments({ data, entries }: { data: AppData; entries: Wor
           <tr><th className={printTh}>직종</th><td className={printTd}>{worker.jobType}</td><th className={printTh}>경력</th><td className={printTd}>{worker.career}</td></tr>
           <tr><th className={printTh}>자격증</th><td className={printTd}>{worker.certifications}</td><th className={printTh}>서류상태</th><td className={printTd}>{getDocumentStatusLabel(worker)}</td></tr>
         </tbody></table>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><DocumentImage title="신분증 앞면" value={worker.idCardFrontImage} /><DocumentImage title="신분증 뒷면" value={worker.idCardBackImage} /><DocumentImage title="이수증" value={worker.safetyCertificateImage} /></div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><DocumentImage title="신분증 앞면" value={getWorkerDocumentDataUrl(worker, "ID_FRONT")} /><DocumentImage title="신분증 뒷면" value={getWorkerDocumentDataUrl(worker, "ID_BACK")} /><DocumentImage title="이수증" value={getWorkerDocumentDataUrl(worker, "SAFETY_CERTIFICATE")} /></div>
         <div className="mt-6 flex items-end justify-end gap-4"><span>신청인: {worker.name}</span>{worker.signatureDataUrl && <img src={worker.signatureDataUrl} alt="서명/도장" className="h-20 w-28 object-contain" />}</div>
       </PrintPage>
     );
@@ -2193,36 +2200,49 @@ function StatusBadge({ status }: { status: RequestStatus | AssignmentStatus }) {
 
 function WorkerFileField({
   label,
+  attachment,
   value,
+  accept = "image/*",
   onChange,
   onDelete,
   onDownload
 }: {
   label: string;
+  attachment?: WorkerAttachment;
   value?: string;
+  accept?: string;
   onChange: (file?: File) => void;
   onDelete: () => void;
   onDownload: () => void;
 }) {
+  const isImage = Boolean(value && (value.startsWith("data:image") || attachment?.mimeType.startsWith("image/")));
   return (
-    <div className="rounded-md border border-navy-100 bg-white p-2">
-      <div className="mb-2 flex items-center justify-between gap-2">
+    <div className="rounded-md border border-navy-100 bg-white p-3">
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-xs font-bold text-slate-600">{label}</span>
         <input
           type="file"
-          accept="image/*"
+          accept={accept}
           onChange={(event) => onChange(event.target.files?.[0])}
-          className="w-full text-xs sm:w-44"
+          className="w-full text-xs sm:w-52"
         />
       </div>
       {value ? (
-        <div className="flex items-center gap-2">
-          <img src={value} alt={label} className="h-16 w-20 rounded border border-navy-100 object-cover" />
-          <Button variant="secondary" onClick={onDownload}>다운로드</Button>
-          <Button variant="danger" onClick={onDelete}>삭제</Button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {isImage ? <img src={value} alt={label} className="h-20 w-28 rounded border border-navy-100 object-cover" /> : <div className="flex h-20 w-28 items-center justify-center rounded border border-navy-100 bg-slate-50 text-xs font-bold text-slate-500">FILE</div>}
+          <div className="min-w-0 flex-1 text-xs text-slate-600">
+            <p className="truncate font-bold text-navy-900">{attachment?.fileName || "저장된 첨부파일"}</p>
+            <p>??: {label}</p>
+            <p>업로드일: {attachment?.uploadedAt || "-"}</p>
+            {attachment?.originalFileName && <p className="truncate">??: {attachment.originalFileName}</p>}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onDownload}>다운로드</Button>
+            <Button variant="danger" onClick={onDelete}>??</Button>
+          </div>
         </div>
       ) : (
-        <p className="text-xs text-slate-400">등록된 파일 없음</p>
+        <p className="text-xs text-slate-400">??? ?? ??</p>
       )}
     </div>
   );
@@ -2252,9 +2272,9 @@ function WorkerApplicationPreview({ worker }: { worker: Worker }) {
         </tbody>
       </table>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <DocumentImage title="신분증 앞면" value={worker.idCardFrontImage} />
-        <DocumentImage title="신분증 뒷면" value={worker.idCardBackImage} />
-        <DocumentImage title="이수증" value={worker.safetyCertificateImage} />
+        <DocumentImage title="신분증 앞면" value={getWorkerDocumentDataUrl(worker, "ID_FRONT")} />
+        <DocumentImage title="신분증 뒷면" value={getWorkerDocumentDataUrl(worker, "ID_BACK")} />
+        <DocumentImage title="이수증" value={getWorkerDocumentDataUrl(worker, "SAFETY_CERTIFICATE")} />
       </div>
       <p className="mt-6 border-t border-navy-200 pt-4 text-sm">상기 내용으로 근로자 등록을 신청하며, 제출 서류는 업무 검수용 샘플 데이터 기준으로 관리합니다.</p>
       <div className="mt-6 flex items-end justify-end gap-4">

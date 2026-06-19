@@ -1,6 +1,6 @@
 "use client";
 
-import { AppData, CalculationRule, Client, Site, WorkAssignment, WorkEntry, WorkRequest, Worker } from "./types";
+import { AppData, CalculationRule, Client, Site, WorkAssignment, WorkEntry, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "./types";
 import { SCHEMA_VERSION, sampleData } from "./sample-data";
 import { ceilWon, getWorkerBaseAmount, normalizeRequestStatuses } from "./calculations";
 import { calculatePayrollDeduction } from "./payrollRules";
@@ -60,17 +60,64 @@ function createSignatureDataUrl(name: string, style: "STAMP" | "SIGN") {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+const legacyWorkerDocuments: Array<{ kind: WorkerDocumentKind; key: keyof Pick<Worker, "idCardFrontImage" | "idCardBackImage" | "safetyCertificateImage" | "otherAttachment">; label: string }> = [
+  { kind: "ID_FRONT", key: "idCardFrontImage", label: "신분증앞면" },
+  { kind: "ID_BACK", key: "idCardBackImage", label: "신분증뒷면" },
+  { kind: "SAFETY_CERTIFICATE", key: "safetyCertificateImage", label: "기초안전보건교육이수증" },
+  { kind: "OTHER", key: "otherAttachment", label: "기타첨부" }
+];
+
+function makeLegacyWorkerAttachment(worker: Partial<Worker>, workerId: string, kind: WorkerDocumentKind, dataUrl?: string, label = "첨부파일"): WorkerAttachment | undefined {
+  if (!dataUrl) return undefined;
+  const uploadedAt = worker.registrationDate || new Date().toISOString().slice(0, 10);
+  const safeName = (worker.name || "근로자").replace(/[\/:*?"<>|]/g, "_");
+  const birthDate = worker.birthDate || "생년월일미입력";
+  const extension = dataUrl.startsWith("data:image/jpeg") ? "jpg" : dataUrl.startsWith("data:image/png") ? "png" : "dat";
+  return {
+    id: `wa-legacy-${workerId}-${kind}`,
+    workerId,
+    kind,
+    fileName: `${safeName}_${birthDate}_${label}_${uploadedAt}.${extension}`,
+    originalFileName: `${label}.${extension}`,
+    mimeType: dataUrl.startsWith("data:") ? dataUrl.slice(5, dataUrl.indexOf(";")) || "application/octet-stream" : "application/octet-stream",
+    dataUrl,
+    uploadedAt
+  };
+}
+
+function migrateWorkerAttachments(worker: Partial<Worker>, workerId: string): WorkerAttachment[] {
+  const attachments = (worker.attachments || []).map((attachment) => ({
+    ...attachment,
+    id: attachment.id || `wa-${workerId}-${attachment.kind}`,
+    workerId: attachment.workerId || workerId,
+    fileName: attachment.fileName || `${worker.name || "???"}_${worker.birthDate || "생년월일미입력"}_${attachment.kind}_${attachment.uploadedAt || new Date().toISOString().slice(0, 10)}`,
+    originalFileName: attachment.originalFileName || attachment.fileName || "attachment",
+    mimeType: attachment.mimeType || "application/octet-stream",
+    uploadedAt: attachment.uploadedAt || worker.registrationDate || new Date().toISOString().slice(0, 10)
+  }));
+
+  legacyWorkerDocuments.forEach(({ kind, key, label }) => {
+    if (attachments.some((attachment) => attachment.kind === kind)) return;
+    const legacy = makeLegacyWorkerAttachment(worker, workerId, kind, worker[key] as string | undefined, label);
+    if (legacy) attachments.push(legacy);
+  });
+
+  return attachments;
+}
+
 function migrateWorker(worker: Partial<Worker>): Worker {
+  const workerId = worker.id || createId("w");
   const birthDate = worker.birthDate || "1980-01-01";
   const birthYear = Number(birthDate.slice(0, 4));
   const name = worker.name || "샘플근로자";
-  const hasFront = Boolean(worker.idCardFrontImage);
-  const hasBack = Boolean(worker.idCardBackImage);
-  const hasCert = Boolean(worker.safetyCertificateImage);
+  const attachments = migrateWorkerAttachments(worker, workerId);
+  const hasFront = attachments.some((attachment) => attachment.kind === "ID_FRONT") || Boolean(worker.idCardFrontImage);
+  const hasBack = attachments.some((attachment) => attachment.kind === "ID_BACK") || Boolean(worker.idCardBackImage);
+  const hasCert = attachments.some((attachment) => attachment.kind === "SAFETY_CERTIFICATE") || Boolean(worker.safetyCertificateImage);
   const documentStatus = hasFront && hasBack && hasCert ? "완료" : hasFront || hasBack || hasCert ? "일부누락" : worker.documentStatus || "미확인";
 
   return {
-    id: worker.id || createId("w"),
+    id: workerId,
     workerCode: worker.workerCode || `W-${String(Math.floor(Math.random() * 9000) + 1000)}`,
     name,
     birthDate,
@@ -90,6 +137,7 @@ function migrateWorker(worker: Partial<Worker>): Worker {
     idCardBackImage: worker.idCardBackImage,
     safetyCertificateImage: worker.safetyCertificateImage,
     otherAttachment: worker.otherAttachment,
+    attachments,
     signatureStyle: worker.signatureStyle || "STAMP",
     signatureDataUrl: worker.signatureDataUrl || createSignatureDataUrl(name, worker.signatureStyle || "STAMP")
   };

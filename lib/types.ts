@@ -11,6 +11,7 @@ export type DeductionType =
   | "기타";
 
 export type InvoiceIssueType = "ISSUED" | "NOT_ISSUED";
+export type WorkerDocumentKind = "ID_FRONT" | "ID_BACK" | "SAFETY_CERTIFICATE" | "OTHER";
 export type DeductionOutputBasis = "FIRST_OUTPUT" | "MONTH_FIRST_DAY";
 export type InsuranceBasis = "CLIENT_BASED" | "SITE_BASED" | "MANUAL";
 export type InsuranceOutputBasis = "MONTH_FIRST_DAY" | "DATE_BASED" | "FIRST_MONTH_NOT_APPLY" | "MANUAL";
@@ -19,6 +20,17 @@ export type FirstMonthInsuranceHandling = "APPLY" | "NOT_APPLY" | "MANUAL";
 export type PensionThresholdBase = "LABOR_COST_TOTAL";
 export type RequestStatus = "배치대기" | "일부배치" | "배치완료" | "초과배치" | "취소";
 export type AssignmentStatus = "배치완료" | "대기" | "취소";
+
+export interface WorkerAttachment {
+  id: string;
+  workerId: string;
+  kind: WorkerDocumentKind;
+  fileName: string;
+  originalFileName: string;
+  mimeType: string;
+  dataUrl: string;
+  uploadedAt: string;
+}
 
 export interface Worker {
   id: string;
@@ -41,6 +53,7 @@ export interface Worker {
   idCardBackImage?: string;
   safetyCertificateImage?: string;
   otherAttachment?: string;
+  attachments?: WorkerAttachment[];
   signatureStyle: "STAMP" | "SIGN";
   signatureDataUrl: string;
   isOver60?: boolean;

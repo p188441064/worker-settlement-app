@@ -1,0 +1,61 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# production
+build/
+dist/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# local logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# local backups and real business source files
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.tsv
+*거래명세*
+*신분증*
+*이수증*
+*주민*
+*개인정보*
+*계좌*
+
+# uploaded identity/certificate images and attachments
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.heic
+*.pdf
+
+# local storage / exported backups
+*_백업_*.json
+backup*.json
+exports/
+uploads/
+private/

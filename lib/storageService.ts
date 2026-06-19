@@ -124,7 +124,8 @@ export class LocalAppStorageService implements AppStorageService {
       const migrated = migrate(JSON.parse(stored) as Partial<AppData>);
       this.saveAppData(migrated);
       return migrated;
-    } catch {
+    } catch (error) {
+      console.error("Failed to load app data", error);
       this.saveAppData(fallbackData);
       onCorruptData?.();
       return fallbackData;

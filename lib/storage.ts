@@ -10,12 +10,35 @@ import { createDefaultCloudSyncConfig, createDefaultCloudUser } from "./cloudSyn
 export const STORAGE_KEY = "worker-settlement-app-data-v1";
 export const storageService = createLocalStorageService(STORAGE_KEY, SCHEMA_VERSION);
 
+export const productionData: AppData = {
+  schemaVersion: SCHEMA_VERSION,
+  workers: [],
+  clients: [],
+  sites: [],
+  workEntries: [],
+  workRequests: [],
+  assignments: [],
+  calculationRules: sampleData.calculationRules,
+  companyInfo: {
+    ...sampleData.companyInfo,
+    companyName: "",
+    companyAddress: "",
+    companyRepresentative: "",
+    businessNumber: "",
+    companyPhone: "",
+    bankAccountText: ""
+  },
+  accessControl: sampleData.accessControl,
+  cloudSync: createDefaultCloudSyncConfig(),
+  receivablePayments: []
+};
+
 export function loadAppData(): AppData {
-  if (typeof window === "undefined") return sampleData;
+  if (typeof window === "undefined") return productionData;
   return storageService.loadAppData({
-    fallbackData: sampleData,
+    fallbackData: productionData,
     migrate: migrateAppData,
-    onCorruptData: () => alert("저장된 구버전 데이터를 읽기 어려워 새 샘플 데이터로 초기화했습니다.")
+    onCorruptData: () => alert("저장된 데이터를 읽기 어려워 빈 운영 데이터로 초기화했습니다. 필요하면 JSON 백업 파일을 다시 불러와 주세요.")
   });
 }
 
@@ -35,6 +58,10 @@ export function getSupabaseMigrationTables(data: AppData) {
   return storageService.toSupabaseTables(data);
 }
 export function resetAppData() {
+  return storageService.resetAppData(productionData);
+}
+
+export function resetSampleData() {
   return storageService.resetAppData(sampleData);
 }
 
@@ -309,33 +336,33 @@ function migrateAccessControl(accessControl: Partial<AppData["accessControl"]> |
 }
 
 export function migrateAppData(partial: Partial<AppData>): AppData {
-  const clients = (partial.clients?.length ? partial.clients : sampleData.clients).map(migrateClient);
-  const workers = (partial.workers?.length ? partial.workers : sampleData.workers).map(migrateWorker);
-  const sites = (partial.sites?.length ? partial.sites : sampleData.sites).map((site) => {
+  const clients = (partial.clients ?? sampleData.clients).map(migrateClient);
+  const workers = (partial.workers ?? sampleData.workers).map(migrateWorker);
+  const sites = (partial.sites ?? sampleData.sites).map((site) => {
     const client = clients.find((item) => item.id === site.clientId);
     return migrateSite(site, client?.name);
   });
-  const calculationRules = (partial.calculationRules?.length ? partial.calculationRules : sampleData.calculationRules).map(migrateRule);
+  const calculationRules = (partial.calculationRules ?? sampleData.calculationRules).map(migrateRule);
   let data: AppData = {
     schemaVersion: SCHEMA_VERSION,
     workers,
     clients,
     sites,
-    workEntries: partial.workEntries || [],
-    workRequests: partial.workRequests || [],
-    assignments: partial.assignments || [],
+    workEntries: partial.workEntries ?? [],
+    workRequests: partial.workRequests ?? [],
+    assignments: partial.assignments ?? [],
     calculationRules,
     companyInfo: migrateCompanyInfo(partial.companyInfo),
     accessControl: migrateAccessControl(partial.accessControl),
     cloudSync: migrateCloudSync(partial.cloudSync),
-    receivablePayments: partial.receivablePayments || []
+    receivablePayments: partial.receivablePayments ?? []
   };
   if (!data.workRequests.length && !data.assignments.length && data.workEntries.length) {
     const converted = convertEntriesToRequestsAndAssignments(data, data.workEntries);
     data = { ...data, workRequests: converted.requests, assignments: converted.assignments };
   }
-  if (!data.workRequests.length) data.workRequests = sampleData.workRequests;
-  if (!data.assignments.length) data.assignments = sampleData.assignments;
+  if (!partial.workRequests && !data.workRequests.length) data.workRequests = sampleData.workRequests;
+  if (!partial.assignments && !data.assignments.length) data.assignments = sampleData.assignments;
   data.workRequests = normalizeRequestStatuses(data.workRequests, data.assignments);
   data.assignments = data.assignments.map((assignment) => ({
     ...sampleData.assignments[0],

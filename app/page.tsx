@@ -3,7 +3,7 @@
 import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
-import { clearAppData, exportAppData, importAppData, loadAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
+import { clearAppData, exportAppData, importAppData, loadAppData, resetAppData, resetSampleData, saveAppData, createId } from "@/lib/storage";
 import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
@@ -251,7 +251,8 @@ export default function Home() {
         const imported = importAppData(String(reader.result));
         setData(imported);
         alert("JSON 백업 데이터를 불러왔습니다.");
-      } catch {
+      } catch (error) {
+        console.error("JSON import failed", error);
         alert("JSON 형식을 확인해 주세요.");
       }
     };
@@ -260,14 +261,14 @@ export default function Home() {
   };
 
   const clearLocalStorage = () => {
-    if (!confirm("브라우저에 저장된 데이터를 초기화할까요? 현재 화면은 샘플 데이터로 다시 불러옵니다.")) return;
+    if (!confirm("브라우저에 저장된 데이터를 초기화할까요? 현재 화면은 빈 운영 데이터로 다시 불러옵니다.")) return;
     clearAppData();
-    setData(loadAppData());
+    setData(resetAppData());
   };
 
   const createSampleData = () => {
     if (!confirm("현재 데이터를 샘플 데이터로 교체할까요? 필요하면 먼저 JSON 백업을 다운로드해 주세요.")) return;
-    setData(resetAppData());
+    setData(resetSampleData());
   };
 
   return (
@@ -2230,6 +2231,16 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
   };
 
   const accessControl = data.accessControl;
+  const readinessChecks = [
+    { label: "메뉴 권한", ok: menus.every((menu) => accessControl.menuPermissions.some((permission) => permission.viewKey === menu.key && permission.admin)) },
+    { label: "회사 기본정보", ok: Boolean(data.companyInfo.companyName && data.companyInfo.businessNumber && data.companyInfo.companyRepresentative) },
+    { label: "거래처/현장 데이터", ok: data.clients.length > 0 && data.sites.length > 0 },
+    { label: "근로자 서류", ok: data.workers.length === 0 || data.workers.every((worker) => getWorkerDocumentStatus(worker) === "완료") },
+    { label: "정산/출력 데이터", ok: data.assignments.some((assignment) => assignment.status !== "취소") },
+    { label: "백업/복원 구조", ok: Boolean(data.schemaVersion && data.accessControl && data.cloudSync) },
+    { label: "모바일 입력 화면", ok: true },
+    { label: "첨부파일 저장소", ok: data.cloudSync.attachmentProvider === "localStorage" || data.cloudSync.attachmentProvider === "supabaseStorage" }
+  ];
 
   return (
     <div className="space-y-5">
@@ -2272,6 +2283,20 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
             </tbody>
           </table>
         </DataTable>
+      </Panel>
+
+      <Panel title="운영 전환 최종 점검">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {readinessChecks.map((check) => (
+            <div key={check.label} className="rounded-md border border-navy-100 bg-white p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <b className="text-navy-900">{check.label}</b>
+                <Badge tone={check.ok ? "mint" : "amber"}>{check.ok ? "완료" : "확인필요"}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-slate-500">신규 운영 시작 시 기본 데이터는 비어 있으며, 샘플 데이터는 상단 버튼으로 필요할 때만 생성됩니다. 실제 운영 전 JSON 백업을 내려받아 보관해 주세요.</p>
       </Panel>
     </div>
   );

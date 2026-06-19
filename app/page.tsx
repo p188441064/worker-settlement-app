@@ -174,10 +174,31 @@ function createSignatureDataUrl(name: string, style: "STAMP" | "SIGN") {
 }
 
 function getWorkerDocumentStatus(worker: Worker): DocumentStatus {
-  const count = [worker.idCardFrontImage, worker.idCardBackImage, worker.safetyCertificateImage].filter(Boolean).length;
+  const count = [
+    getWorkerDocumentDataUrl(worker, "ID_FRONT"),
+    getWorkerDocumentDataUrl(worker, "ID_BACK"),
+    getWorkerDocumentDataUrl(worker, "SAFETY_CERTIFICATE")
+  ].filter(Boolean).length;
   if (count === 3) return "완료";
   if (count > 0) return "일부누락";
   return "미확인";
+}
+
+function getWorkerWorkSummary(workerId: string, data: AppData) {
+  const assignments = data.assignments
+    .filter((assignment) => assignment.workerId === workerId && assignment.status !== "취소")
+    .sort((a, b) => b.workDate.localeCompare(a.workDate));
+  const displayAssignments = assignments.map((assignment) => getDisplayAssignment(assignment, data));
+  const recentAssignment = displayAssignments[0];
+  const recentSite = recentAssignment ? data.sites.find((site) => site.id === recentAssignment.siteId) : undefined;
+  return {
+    assignments: displayAssignments,
+    totalWorkDays: new Set(assignments.map((assignment) => assignment.workDate)).size,
+    totalWorkCount: assignments.reduce((sum, assignment) => sum + assignment.workCount, 0),
+    totalPaymentAmount: displayAssignments.reduce((sum, assignment) => sum + assignment.paymentAmount, 0),
+    recentWorkDate: recentAssignment?.workDate || "",
+    recentSiteName: recentSite?.siteName || recentSite?.name || "-"
+  };
 }
 
 export default function Home() {
@@ -679,13 +700,21 @@ function OperationChecklistView({ data, selectedMonth }: { data: AppData; select
 function WorkersView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
   const [query, setQuery] = useState("");
   const [form, setForm] = useState<Worker>(emptyWorker);
-  const [missingOnly, setMissingOnly] = useState(false);
+  const [documentFilter, setDocumentFilter] = useState<"ALL" | "COMPLETE" | "MISSING">("ALL");
   const [showApplication, setShowApplication] = useState(false);
+  const normalizedQuery = query.trim().toLowerCase();
   const workers = data.workers
-    .map((worker) => ({ ...worker, documentStatus: getWorkerDocumentStatus(worker) }))
-    .filter((worker) => [worker.workerCode, worker.name, worker.mobile, worker.phone, worker.address, worker.jobType].join(" ").includes(query))
-    .filter((worker) => !missingOnly || worker.documentStatus !== "완료");
+    .map((worker) => ({ ...worker, documentStatus: getWorkerDocumentStatus(worker), workSummary: getWorkerWorkSummary(worker.id, data) }))
+    .filter((worker) => {
+      const residentFront = (worker.residentNumber || "").replace(/[^0-9]/g, "").slice(0, 6);
+      const searchable = [worker.workerCode, worker.name, worker.mobile, worker.phone, worker.residentNumber, residentFront, worker.address, worker.jobType]
+        .join(" ")
+        .toLowerCase();
+      return !normalizedQuery || searchable.includes(normalizedQuery);
+    })
+    .filter((worker) => documentFilter === "ALL" || (documentFilter === "COMPLETE" ? worker.documentStatus === "완료" : worker.documentStatus !== "완료"));
   const editing = Boolean(form.id);
+  const selectedWorkerSummary = form.id ? getWorkerWorkSummary(form.id, data) : undefined;
 
   const updateWorkerForm = (next: Worker) => setForm({ ...next, documentStatus: getWorkerDocumentStatus(next) });
 
@@ -810,6 +839,24 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
             <Button variant="secondary" onClick={() => setShowApplication((value) => !value)}>신상명세서 미리보기</Button>
             <Button variant="secondary" onClick={printWorkerDocument}>신상명세서 출력/PDF</Button>
           </div>
+          {selectedWorkerSummary && (
+            <div className="grid gap-3 rounded-md border border-navy-100 bg-white p-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="rounded-md bg-navy-50 p-3 text-sm"><b>총 출역일수</b><p className="mt-1 text-lg font-black text-navy-900">{selectedWorkerSummary.totalWorkDays}일</p></div>
+                <div className="rounded-md bg-navy-50 p-3 text-sm"><b>누적 지급액</b><p className="mt-1 text-lg font-black text-navy-900">{formatWon(selectedWorkerSummary.totalPaymentAmount)}</p></div>
+                <div className="rounded-md bg-navy-50 p-3 text-sm"><b>최근 출역</b><p className="mt-1 text-sm font-bold text-navy-900">{selectedWorkerSummary.recentWorkDate ? `${formatDateDot(selectedWorkerSummary.recentWorkDate)} / ${selectedWorkerSummary.recentSiteName}` : "-"}</p></div>
+              </div>
+              <div className="grid gap-2">
+                <p className="text-xs font-bold text-slate-500">최근 출역 이력</p>
+                {selectedWorkerSummary.assignments.slice(0, 5).map((assignment) => (
+                  <div key={assignment.id} className="rounded-md border border-navy-100 p-2 text-xs text-slate-600">
+                    <b className="text-navy-900">{formatDateDot(assignment.workDate)}</b> · {data.clients.find((client) => client.id === assignment.clientId)?.name || "-"} / {data.sites.find((site) => site.id === assignment.siteId)?.siteName || data.sites.find((site) => site.id === assignment.siteId)?.name || "-"} · {formatWon(assignment.paymentAmount)}
+                  </div>
+                ))}
+                {selectedWorkerSummary.assignments.length === 0 && <p className="rounded-md bg-slate-50 p-2 text-xs text-slate-500">출역 이력이 없습니다.</p>}
+              </div>
+            </div>
+          )}
         </div>
       </Panel>
 
@@ -820,17 +867,38 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
         </Panel>
       )}
 
-      <Panel title="근로자 목록" actions={<div className="flex flex-wrap items-center gap-2"><label className="text-sm"><input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} /> 서류누락</label><TextInput placeholder="코드, 이름, 휴대폰, 주소 검색" value={query} onChange={(e) => setQuery(e.target.value)} className="w-full sm:w-72" /></div>}>
+      <Panel
+        title="근로자 목록"
+        actions={
+          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[160px_1fr]">
+            <SelectInput value={documentFilter} onChange={(e) => setDocumentFilter(e.target.value as "ALL" | "COMPLETE" | "MISSING")}>
+              <option value="ALL">서류 전체</option>
+              <option value="COMPLETE">서류완비</option>
+              <option value="MISSING">서류미비</option>
+            </SelectInput>
+            <TextInput placeholder="이름, 전화번호, 주민번호 앞자리 검색" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+        }
+      >
         <DataTable>
           <table className="w-full border-collapse">
-            <thead><tr><th className={th}>근로자코드</th><th className={th}>성명</th><th className={th}>생년월일</th><th className={th}>나이</th><th className={th}>60세 여부</th><th className={th}>휴대폰</th><th className={th}>직종</th><th className={th}>등록일</th><th className={th}>서류상태</th><th className={th}>최근출역일</th><th className={th}>관리</th></tr></thead>
+            <thead><tr><th className={th}>근로자코드</th><th className={th}>성명</th><th className={th}>생년월일</th><th className={th}>휴대폰</th><th className={th}>서류상태</th><th className={th}>총 출역일수</th><th className={th}>누적 지급액</th><th className={th}>최근 현장</th><th className={th}>최근 출역일</th><th className={th}>관리</th></tr></thead>
             <tbody>
               {workers.map((worker) => (
                 <tr key={worker.id}>
-                  <td className={td}>{worker.workerCode}</td><td className={td}>{worker.name}</td><td className={td}>{worker.birthDate}</td><td className={td}>{calculateAge(worker.birthDate)}</td><td className={td}>{ageGroupLabel(getAgeGroupByWorkDate(worker.birthDate, today))}</td><td className={td}>{worker.mobile || worker.phone}</td><td className={td}>{worker.jobType}</td><td className={td}>{worker.registrationDate}</td><td className={td}><Badge tone={docTone(worker.documentStatus)}>{worker.documentStatus}</Badge></td><td className={td}>{getLatestWorkDate(worker.id, data.assignments)}</td>
+                  <td className={td}>{worker.workerCode}</td>
+                  <td className={td}>{worker.name}</td>
+                  <td className={td}>{worker.birthDate}</td>
+                  <td className={td}>{worker.mobile || worker.phone}</td>
+                  <td className={td}><Badge tone={docTone(worker.documentStatus)}>{worker.documentStatus}</Badge></td>
+                  <td className={td}>{worker.workSummary.totalWorkDays}일</td>
+                  <td className={td}>{formatWon(worker.workSummary.totalPaymentAmount)}</td>
+                  <td className={td}>{worker.workSummary.recentSiteName}</td>
+                  <td className={td}>{worker.workSummary.recentWorkDate ? formatDateDot(worker.workSummary.recentWorkDate) : "-"}</td>
                   <td className={`${td} space-x-2`}><Button variant="secondary" onClick={() => editWorker(worker)}>수정</Button><Button variant="danger" onClick={() => remove(worker.id)}>삭제</Button></td>
                 </tr>
               ))}
+              {workers.length === 0 && <tr><td className={td} colSpan={10}>검색 조건에 맞는 근로자가 없습니다.</td></tr>}
             </tbody>
           </table>
         </DataTable>

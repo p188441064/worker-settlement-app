@@ -4,34 +4,30 @@ import { AppData, CalculationRule, Client, Site, WorkAssignment, WorkEntry, Work
 import { SCHEMA_VERSION, sampleData } from "./sample-data";
 import { ceilWon, getWorkerBaseAmount, normalizeRequestStatuses } from "./calculations";
 import { calculatePayrollDeduction } from "./payrollRules";
+import { createLocalStorageService } from "./storageService";
 
 export const STORAGE_KEY = "worker-settlement-app-data-v1";
+export const storageService = createLocalStorageService(STORAGE_KEY, SCHEMA_VERSION);
 
 export function loadAppData(): AppData {
   if (typeof window === "undefined") return sampleData;
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (!stored) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
-    return sampleData;
-  }
-  try {
-    const migrated = migrateAppData(JSON.parse(stored) as Partial<AppData>);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-    return migrated;
-  } catch {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
-    alert("저장된 구버전 데이터를 읽기 어려워 새 샘플 데이터로 초기화했습니다.");
-    return sampleData;
-  }
+  return storageService.loadAppData({
+    fallbackData: sampleData,
+    migrate: migrateAppData,
+    onCorruptData: () => alert("저장된 구버전 데이터를 읽기 어려워 새 샘플 데이터로 초기화했습니다.")
+  });
 }
 
 export function saveAppData(data: AppData) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, schemaVersion: SCHEMA_VERSION }));
+  storageService.saveAppData(data);
 }
 
 export function resetAppData() {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
-  return sampleData;
+  return storageService.resetAppData(sampleData);
+}
+
+export function clearAppData() {
+  storageService.clearAppData();
 }
 
 export function createId(prefix: string) {

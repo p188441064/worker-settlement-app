@@ -3,7 +3,7 @@
 import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
-import { STORAGE_KEY, loadAppData, migrateAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
+import { clearAppData, loadAppData, migrateAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
 import { createWorkerAttachmentFromFile, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
@@ -229,7 +229,7 @@ export default function Home() {
 
   const clearLocalStorage = () => {
     if (!confirm("브라우저에 저장된 데이터를 초기화할까요? 현재 화면은 샘플 데이터로 다시 불러옵니다.")) return;
-    window.localStorage.removeItem(STORAGE_KEY);
+    clearAppData();
     setData(loadAppData());
   };
 

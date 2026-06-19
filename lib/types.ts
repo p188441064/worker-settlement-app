@@ -30,6 +30,10 @@ export interface WorkerAttachment {
   mimeType: string;
   dataUrl: string;
   uploadedAt: string;
+  storageProvider?: "local" | "supabase";
+  storageBucket?: string;
+  storagePath?: string;
+  publicUrl?: string;
 }
 
 export interface Worker {

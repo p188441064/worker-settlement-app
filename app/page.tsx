@@ -4,7 +4,7 @@ import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
 import { clearAppData, loadAppData, migrateAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
-import { createWorkerAttachmentFromFile, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
+import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
 
@@ -530,23 +530,29 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
     updateWorkerForm(upsertWorkerAttachment(form, attachment));
   };
 
-  const deleteFile = (kind: WorkerDocumentKind) => {
+  const deleteFile = async (kind: WorkerDocumentKind) => {
+    const attachment = getWorkerAttachment(form, kind);
+    await deleteWorkerAttachmentStorage(attachment);
     updateWorkerForm(removeWorkerAttachment(form, kind));
   };
 
-  const downloadFile = (kind: WorkerDocumentKind) => {
+  const downloadFile = async (kind: WorkerDocumentKind) => {
     const attachment = getWorkerAttachment(form, kind);
-    const dataUrl = attachment?.dataUrl || getWorkerDocumentDataUrl(form, kind);
+    if (attachment) {
+      await downloadWorkerAttachment(attachment);
+      return;
+    }
+    const dataUrl = getWorkerDocumentDataUrl(form, kind);
     if (!dataUrl) return;
-    downloadDataUrl(dataUrl, attachment?.fileName || `${form.name || "근로자"}_${workerDocumentLabels[kind]}.png`);
+    downloadDataUrl(dataUrl, `${form.name || "???"}_${workerDocumentLabels[kind]}.png`);
   };
 
-  const downloadSelectedWorkerFiles = () => {
-    if (!downloadWorkerAttachments(form)) alert("다운로드할 첨부파일이 없습니다.");
+  const downloadSelectedWorkerFiles = async () => {
+    if (!(await downloadWorkerAttachments(form))) alert("????? ????? ????.");
   };
 
-  const downloadAllWorkerFiles = () => {
-    if (!downloadAttachmentsZip(data.workers, `전체근로자_첨부파일_${today}.zip`)) alert("ZIP으로 다운로드할 첨부파일이 없습니다.");
+  const downloadAllWorkerFiles = async () => {
+    if (!(await downloadAttachmentsZip(data.workers, `?????_????_${today}.zip`))) alert("ZIP?? ????? ????? ????.");
   };
 
   const printWorkerDocument = () => {

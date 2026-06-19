@@ -1,4 +1,5 @@
 import { Worker, WorkerAttachment, WorkerDocumentKind } from "./types";
+import { deleteWorkerDocumentFile, downloadWorkerDocumentFile, uploadWorkerDocumentFile } from "./worker-document-storage";
 
 export const workerDocumentLabels: Record<WorkerDocumentKind, string> = {
   ID_FRONT: "신분증앞면",
@@ -34,15 +35,27 @@ function readFileAsDataUrl(file: File) {
 
 export async function createWorkerAttachmentFromFile(worker: Worker, kind: WorkerDocumentKind, file: File): Promise<WorkerAttachment> {
   const uploadedAt = new Date().toISOString().slice(0, 10);
+  const fileName = createWorkerDocumentFileName(worker, kind, uploadedAt, file.name);
+  const dataUrl = await readFileAsDataUrl(file);
+  let uploaded: Awaited<ReturnType<typeof uploadWorkerDocumentFile>> | undefined;
+  try {
+    uploaded = await uploadWorkerDocumentFile(worker, kind, fileName, file);
+  } catch (error) {
+    console.warn("Supabase upload failed. Falling back to localStorage Base64 attachment.", error);
+  }
   return {
     id: `wa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     workerId: worker.id,
     kind,
-    fileName: createWorkerDocumentFileName(worker, kind, uploadedAt, file.name),
+    fileName,
     originalFileName: file.name,
     mimeType: file.type || "application/octet-stream",
-    dataUrl: await readFileAsDataUrl(file),
-    uploadedAt
+    dataUrl: uploaded?.publicUrl || dataUrl,
+    uploadedAt,
+    storageProvider: uploaded?.storageProvider || "local",
+    storageBucket: uploaded?.storageBucket,
+    storagePath: uploaded?.storagePath,
+    publicUrl: uploaded?.publicUrl
   };
 }
 
@@ -51,7 +64,8 @@ export function getWorkerAttachment(worker: Worker, kind: WorkerDocumentKind) {
 }
 
 export function getWorkerDocumentDataUrl(worker: Worker, kind: WorkerDocumentKind) {
-  return getWorkerAttachment(worker, kind)?.dataUrl || String(worker[workerDocumentLegacyKeys[kind]] || "");
+  const attachment = getWorkerAttachment(worker, kind);
+  return attachment?.publicUrl || attachment?.dataUrl || String(worker[workerDocumentLegacyKeys[kind]] || "");
 }
 
 export function upsertWorkerAttachment(worker: Worker, attachment: WorkerAttachment): Worker {
@@ -73,6 +87,10 @@ function dataUrlToBytes(dataUrl: string) {
   return bytes;
 }
 
+async function blobToBytes(blob: Blob) {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
 export function downloadDataUrl(dataUrl: string, fileName: string) {
   const link = document.createElement("a");
   link.href = dataUrl;
@@ -80,10 +98,39 @@ export function downloadDataUrl(dataUrl: string, fileName: string) {
   link.click();
 }
 
-export function downloadWorkerAttachments(worker: Worker) {
+export async function downloadWorkerAttachment(attachment: WorkerAttachment) {
+  if (attachment.storageProvider === "supabase" && attachment.storagePath) {
+    try {
+      const blob = await downloadWorkerDocumentFile(attachment);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        downloadDataUrl(url, attachment.fileName);
+        URL.revokeObjectURL(url);
+        return;
+      }
+    } catch (error) {
+      console.warn("Supabase download failed. Falling back to stored URL.", error);
+    }
+  }
+  downloadDataUrl(attachment.publicUrl || attachment.dataUrl, attachment.fileName);
+}
+
+export async function deleteWorkerAttachmentStorage(attachment?: WorkerAttachment) {
+  if (!attachment) return false;
+  try {
+    return await deleteWorkerDocumentFile(attachment);
+  } catch (error) {
+    console.warn("Supabase delete failed. Local metadata will still be removed.", error);
+    return false;
+  }
+}
+
+export async function downloadWorkerAttachments(worker: Worker) {
   const attachments = worker.attachments || [];
   if (!attachments.length) return false;
-  attachments.forEach((attachment) => downloadDataUrl(attachment.dataUrl, attachment.fileName));
+  for (let index = 0; index < attachments.length; index += 1) {
+    await downloadWorkerAttachment(attachments[index]);
+  }
   return true;
 }
 
@@ -117,11 +164,35 @@ function pushBytes(target: number[], bytes: Uint8Array) {
   bytes.forEach((byte) => target.push(byte));
 }
 
-export function downloadAttachmentsZip(workers: Worker[], zipFileName = "worker-documents.zip") {
-  const files = workers.flatMap((worker) => (worker.attachments || []).map((attachment) => ({
-    path: `${(worker.name || worker.workerCode || "worker").replace(/[\/:*?"<>|]/g, "_")}/${attachment.fileName}`,
-    bytes: dataUrlToBytes(attachment.dataUrl)
-  })));
+async function getAttachmentBytes(attachment: WorkerAttachment) {
+  if (attachment.dataUrl?.startsWith("data:")) return dataUrlToBytes(attachment.dataUrl);
+  if (attachment.storageProvider === "supabase" && attachment.storagePath) {
+    const blob = await downloadWorkerDocumentFile(attachment);
+    if (blob) return blobToBytes(blob);
+  }
+  if (attachment.publicUrl) {
+    const response = await fetch(attachment.publicUrl);
+    if (response.ok) return blobToBytes(await response.blob());
+  }
+  return undefined;
+}
+
+export async function downloadAttachmentsZip(workers: Worker[], zipFileName = "worker-documents.zip") {
+  const files: Array<{ path: string; bytes: Uint8Array }> = [];
+  for (let workerIndex = 0; workerIndex < workers.length; workerIndex += 1) {
+    const worker = workers[workerIndex];
+    const attachments = worker.attachments || [];
+    for (let attachmentIndex = 0; attachmentIndex < attachments.length; attachmentIndex += 1) {
+      const attachment = attachments[attachmentIndex];
+      const bytes = await getAttachmentBytes(attachment);
+      if (bytes) {
+        files.push({
+          path: `${(worker.name || worker.workerCode || "worker").replace(/[\/:*?"<>|]/g, "_")}/${attachment.fileName}`,
+          bytes
+        });
+      }
+    }
+  }
   if (!files.length) return false;
 
   const output: number[] = [];

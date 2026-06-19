@@ -19,6 +19,7 @@ const menus: Array<{ key: ViewKey; label: string }> = [
   { key: "rules", label: "계산기준 관리" },
   { key: "settings", label: "설정" },
   { key: "checklist", label: "운영 체크리스트" },
+  { key: "productionTest", label: "운영 테스트" },
   { key: "help", label: "도움말" }
 ];
 
@@ -331,6 +332,7 @@ export default function Home() {
           {view === "rules" && <RulesView data={data} updateData={updateData} />}
           {view === "settings" && <SettingsView data={data} updateData={updateData} />}
           {view === "checklist" && <OperationChecklistView data={data} selectedMonth={selectedMonth} />}
+          {view === "productionTest" && <ProductionTestChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "help" && <HelpView />}
         </div>
       </section>
@@ -704,6 +706,91 @@ function OperationChecklistView({ data, selectedMonth }: { data: AppData; select
   );
 }
 
+function ProductionTestChecklistView({ data, selectedMonth }: { data: AppData; selectedMonth: string }) {
+  const requests = normalizeRequestStatuses(data.workRequests, data.assignments);
+  const receivableRows = buildReceivableRows(data, selectedMonth);
+  const activeAssignments = data.assignments.filter((assignment) => assignment.status !== "취소");
+  const completeDocumentWorkers = data.workers.filter((worker) => getWorkerDocumentStatus(worker) === "완료");
+  const missingDocumentWorkers = data.workers.filter((worker) => getWorkerDocumentStatus(worker) !== "완료");
+  const payableRows = receivableRows.filter((row) => row.claimAmount > 0);
+  const paidRows = receivableRows.filter((row) => row.paidAmount > 0);
+  const balanceRows = receivableRows.filter((row) => row.balanceAmount > 0);
+  const issuedRows = receivableRows.filter((row) => row.invoiceStatementIssued || row.taxInvoiceIssued);
+  const workerWithHistory = data.workers.filter((worker) => activeAssignments.some((assignment) => assignment.workerId === worker.id));
+  const canPrintClosing = Boolean(data.clients.length && data.sites.length && activeAssignments.length);
+  const checklist = [
+    { area: "거래처/현장", item: "거래처 3건 이상과 현장 5건 이상", ok: data.clients.length >= 3 && data.sites.length >= 5, detail: `거래처 ${data.clients.length}건 / 현장 ${data.sites.length}건` },
+    { area: "근로자", item: "근로자 10명 이상과 서류 완비/미비 혼합", ok: data.workers.length >= 10 && completeDocumentWorkers.length > 0 && missingDocumentWorkers.length > 0, detail: `근로자 ${data.workers.length}명 / 완비 ${completeDocumentWorkers.length}명 / 미비 ${missingDocumentWorkers.length}명` },
+    { area: "첨부파일", item: "신분증/이수증 이미지 썸네일 검수 가능", ok: data.workers.some((worker) => (worker.attachments || []).some((attachment) => attachment.dataUrl?.startsWith("data:image"))), detail: "근로자 관리에서 첨부 썸네일, 삭제, 다운로드 버튼 확인" },
+    { area: "요청·배치", item: "요청 대비 배치율/부족인원 확인", ok: requests.length > 0 && activeAssignments.length > 0, detail: `요청 ${requests.length}건 / 배치 ${activeAssignments.length}건` },
+    { area: "정산", item: "월말 정산 출력 대상 데이터", ok: canPrintClosing, detail: canPrintClosing ? "거래명세서, 지급명세서, 위임장, 영수증 출력 가능" : "정산 출력용 배치 데이터 필요" },
+    { area: "미수금", item: "청구/입금/미수/부분입금 검수", ok: payableRows.length > 0 && paidRows.length > 0 && balanceRows.length > 0, detail: `청구 ${payableRows.length}건 / 입금 ${paidRows.length}건 / 미수 ${balanceRows.length}건` },
+    { area: "계산기준", item: "발행/미발행 계산서와 공제 규칙", ok: data.calculationRules.some((rule) => rule.invoiceIssueType === "ISSUED") && data.calculationRules.some((rule) => rule.invoiceIssueType === "NOT_ISSUED"), detail: `계산기준 ${data.calculationRules.length}건` },
+    { area: "발행이력", item: "거래명세서/세금계산서 상태 확인", ok: receivableRows.length > 0, detail: issuedRows.length > 0 ? `발행완료 ${issuedRows.length}건 포함` : "미수금 화면에서 발행완료 체크 테스트" },
+    { area: "개인일지", item: "근로자별 출역 이력 조회", ok: workerWithHistory.length > 0, detail: `출역 이력 보유 근로자 ${workerWithHistory.length}명` },
+    { area: "백업/복원", item: "JSON 백업/불러오기 유지", ok: Boolean(data.schemaVersion && data.accessControl && data.cloudSync), detail: `schemaVersion ${data.schemaVersion}` },
+    { area: "권한", item: "관리자/일반 사용자 메뉴 권한", ok: data.accessControl.menuPermissions.length >= menus.length, detail: `권한 ${data.accessControl.menuPermissions.length}개 메뉴` },
+    { area: "모바일", item: "카드형 입력/테이블 대체 레이아웃 검수", ok: true, detail: "휴대폰 화면에서 메뉴, 입력폼, 첨부파일, 미수금 목록 확인" }
+  ];
+  const passed = checklist.filter((item) => item.ok).length;
+
+  return (
+    <div className="space-y-5">
+      <Panel title="운영 테스트 샘플 시나리오">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="검수 완료" value={`${passed}/${checklist.length}`} tone={passed === checklist.length ? "mint" : "navy"} />
+          <StatCard label="거래처/현장" value={`${data.clients.length}/${data.sites.length}`} />
+          <StatCard label="근로자" value={`${data.workers.length}명`} />
+          <StatCard label="미수금" value={formatWon(receivableRows.reduce((sum, row) => sum + row.balanceAmount, 0))} />
+        </div>
+        <div className="mt-4 grid gap-3 rounded-md bg-navy-50 p-4 text-sm text-slate-700 sm:grid-cols-2 xl:grid-cols-3">
+          <p><b>1.</b> 상단의 샘플 데이터 생성으로 테스트 데이터를 만듭니다.</p>
+          <p><b>2.</b> 거래처/현장, 근로자, 요청·배치, 정산, 미수금 메뉴를 순서대로 확인합니다.</p>
+          <p><b>3.</b> JSON 백업을 내려받고 다시 불러와 데이터가 유지되는지 확인합니다.</p>
+        </div>
+      </Panel>
+
+      <Panel title="전체 기능 테스트 체크리스트">
+        <DataTable>
+          <table className="w-full border-collapse">
+            <thead><tr>{["영역", "검수 항목", "상태", "확인 내용"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+            <tbody>
+              {checklist.map((item) => (
+                <tr key={`${item.area}-${item.item}`}>
+                  <td className={td}>{item.area}</td>
+                  <td className={td}>{item.item}</td>
+                  <td className={td}><Badge tone={item.ok ? "mint" : "amber"}>{item.ok ? "정상" : "확인필요"}</Badge></td>
+                  <td className={td}>{item.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DataTable>
+      </Panel>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="샘플 데이터 구성">
+          <div className="grid gap-2 text-sm text-slate-700">
+            <p className="rounded-md bg-white p-3">거래처와 현장: 마감일, 결제일, 계산서 발행 여부가 다른 현장 포함</p>
+            <p className="rounded-md bg-white p-3">근로자: 60세 이상/미만, 서류 완비/미비, 첨부 이미지 포함</p>
+            <p className="rounded-md bg-white p-3">배치/정산: 여러 날짜와 현장 배치, 공제 계산, 출력물 검수 가능</p>
+            <p className="rounded-md bg-white p-3">미수금: 청구금액, 부분입금, 잔액, 결제예정일 검수 가능</p>
+          </div>
+        </Panel>
+        <Panel title="권장 테스트 순서">
+          <ol className="grid list-decimal gap-2 pl-5 text-sm leading-6 text-slate-700">
+            <li>대시보드 수치와 운영 알림 확인</li>
+            <li>근로자 상세에서 첨부파일 미리보기/다운로드 확인</li>
+            <li>요청·배치에서 부족인원과 공제 판단 사유 확인</li>
+            <li>월말 정산에서 거래명세서와 지급명세서 미리보기/인쇄 확인</li>
+            <li>전체 미수금에서 부분입금/완납/발행완료 상태 확인</li>
+            <li>설정에서 권한과 운영 전환 최종 점검 카드 확인</li>
+          </ol>
+        </Panel>
+      </div>
+    </div>
+  );
+}
 function WorkersView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
   const [query, setQuery] = useState("");
   const [form, setForm] = useState<Worker>(emptyWorker);

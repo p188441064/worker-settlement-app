@@ -1,4 +1,4 @@
-import { AppData, CalculationRule, Client, DeductionType, Site, WorkAssignment, WorkRequest, Worker } from "./types";
+import { AppData, CalculationRule, Client, DeductionType, Site, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "./types";
 import { createCalculationRule, normalizeRequestStatuses } from "./calculations";
 import { calculatePayrollDeduction } from "./payrollRules";
 
@@ -17,6 +17,32 @@ export const sampleWorkers: Worker[] = [
   { id: "w-010", workerCode: "W-0010", name: "서준호", birthDate: "1975-07-30", ageGroup: "UNDER_60", phone: "010-1000-2010", landline: "", mobile: "010-1000-2010", residentNumber: "750730-1******", address: "경기도 예시시 샘플길 64", registrationDate: "2026-06-05", jobType: "보통인부", career: "고정 가능", certifications: "기초안전보건교육", documentStatus: "완료", memo: "고정 가능", signatureStyle: "SIGN", signatureDataUrl: "" }
 ];
 
+
+const sampleDocumentDataUrl = (label: string, name: string) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="420" height="260"><rect width="420" height="260" fill="#fff"/><rect x="18" y="18" width="384" height="224" fill="none" stroke="#0b2537" stroke-width="4"/><text x="210" y="115" text-anchor="middle" font-size="28" font-family="Arial" fill="#0b2537">${label}</text><text x="210" y="160" text-anchor="middle" font-size="24" font-family="Arial" fill="#0b2537">${name}</text></svg>`)}`;
+
+function sampleAttachment(worker: Worker, kind: WorkerDocumentKind, label: string): WorkerAttachment {
+  return {
+    id: `sample-${worker.id}-${kind}`,
+    workerId: worker.id,
+    kind,
+    fileName: `${worker.name}_${worker.birthDate}_${label}_${worker.registrationDate}.svg`,
+    originalFileName: `${label}.svg`,
+    mimeType: "image/svg+xml",
+    dataUrl: sampleDocumentDataUrl(label, worker.name),
+    uploadedAt: worker.registrationDate,
+    storageProvider: "local"
+  };
+}
+
+sampleWorkers.forEach((worker, index) => {
+  const attachments = [sampleAttachment(worker, "ID_FRONT", "신분증앞면")];
+  if (index % 3 !== 1) attachments.push(sampleAttachment(worker, "ID_BACK", "신분증뒷면"));
+  if (index % 4 !== 3) attachments.push(sampleAttachment(worker, "SAFETY_CERTIFICATE", "기초안전보건교육이수증"));
+  if (index === 0) attachments.push(sampleAttachment(worker, "OTHER", "기타첨부"));
+  worker.attachments = attachments;
+  worker.documentStatus = attachments.some((attachment) => attachment.kind === "ID_FRONT") && attachments.some((attachment) => attachment.kind === "ID_BACK") && attachments.some((attachment) => attachment.kind === "SAFETY_CERTIFICATE") ? "완료" : "일부누락";
+});
 export const sampleClients: Client[] = [
   { id: "c-001", name: "동해건설", managerName: "문상현", phone: "02-2000-3101", fax: "", email: "sample1@example.test", email2: "", closingDay: 25, paymentDay: 10, memo: "월 1회 정산" },
   { id: "c-002", name: "새봄산업", managerName: "류정아", phone: "02-2000-3102", fax: "", email: "sample2@example.test", email2: "", closingDay: 30, paymentDay: 15, memo: "현장별 명세 요청" },
@@ -182,6 +208,7 @@ export const sampleData: AppData = {
       { viewKey: "rules", admin: true, user: false, sensitive: true },
       { viewKey: "settings", admin: true, user: false, sensitive: true },
       { viewKey: "checklist", admin: true, user: true, sensitive: false },
+      { viewKey: "productionTest", admin: true, user: false, sensitive: true },
       { viewKey: "help", admin: true, user: true, sensitive: false }
     ]
   },

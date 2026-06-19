@@ -269,20 +269,48 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
   const todayAssignments = data.assignments.filter((assignment) => assignment.workDate === today && assignment.status !== "취소");
   const monthRequests = requests.filter((request) => isSameMonth(request.workDate, selectedMonth));
   const monthAssignments = data.assignments.filter((assignment) => isSameMonth(assignment.workDate, selectedMonth) && assignment.status !== "취소");
-  const completedToday = todayRequests.filter((request) => request.status === "배치완료").length;
-  const partialToday = todayRequests.filter((request) => request.status === "일부배치").length;
+  const todayRequestedCount = todayRequests.reduce((sum, request) => sum + request.requestedCount, 0);
+  const todayAssignedCount = todayAssignments.length;
   const shortageToday = todayRequests.reduce((sum, request) => {
     const assigned = getAssignedCount(request.id, data.assignments);
     return sum + Math.max(request.requestedCount - assigned, 0);
   }, 0);
-  const recent = [...requests].sort((a, b) => b.workDate.localeCompare(a.workDate) || b.requestDate.localeCompare(a.requestDate)).slice(0, 10);
+  const monthShortageCount = monthRequests.reduce((sum, request) => {
+    const assigned = getAssignedCount(request.id, data.assignments);
+    return sum + Math.max(request.requestedCount - assigned, 0);
+  }, 0);
   const monthRequestedCount = monthRequests.reduce((sum, request) => sum + request.requestedCount, 0);
   const monthAssignedCount = monthAssignments.length;
+  const missingDocumentWorkers = data.workers.filter((worker) => getWorkerDocumentStatus(worker) !== "완료");
   const receivableRows = buildReceivableRows(data, selectedMonth);
   const totalClaim = receivableRows.reduce((sum, row) => sum + row.claimAmount, 0);
   const totalPaid = receivableRows.reduce((sum, row) => sum + row.paidAmount, 0);
   const totalReceivable = receivableRows.reduce((sum, row) => sum + row.balanceAmount, 0);
+  const paymentDueRows = receivableRows.filter((row) => row.balanceAmount > 0 && row.expectedPaymentDate >= today);
+  const paymentDueAmount = paymentDueRows.reduce((sum, row) => sum + row.balanceAmount, 0);
   const overdueRows = receivableRows.filter((row) => row.balanceAmount > 0 && row.overdueDays > 0);
+  const closingWindowEnd = new Date(`${today}T00:00:00`);
+  closingWindowEnd.setDate(closingWindowEnd.getDate() + 7);
+  const [closingYear, closingMonth] = selectedMonth.split("-").map(Number);
+  const closingDueSites = data.sites
+    .map((site) => {
+      const lastDay = new Date(closingYear, closingMonth, 0).getDate();
+      const closingDate = `${selectedMonth}-${String(Math.min(site.closingDay || 25, lastDay)).padStart(2, "0")}`;
+      const closingAt = new Date(`${closingDate}T00:00:00`);
+      const assignmentCount = monthAssignments.filter((assignment) => assignment.siteId === site.id).length;
+      return { site, closingDate, closingAt, assignmentCount };
+    })
+    .filter((item) => item.assignmentCount > 0 && item.closingDate >= today && item.closingAt <= closingWindowEnd)
+    .sort((a, b) => a.closingDate.localeCompare(b.closingDate));
+  const recentRequests = [...requests].sort((a, b) => b.workDate.localeCompare(a.workDate) || b.requestDate.localeCompare(a.requestDate)).slice(0, 8);
+  const recentAssignments = [...data.assignments]
+    .filter((assignment) => assignment.status !== "취소")
+    .sort((a, b) => b.workDate.localeCompare(a.workDate))
+    .slice(0, 8);
+  const settlementRows = receivableRows
+    .filter((row) => row.claimAmount > 0 || row.balanceAmount > 0)
+    .sort((a, b) => a.expectedPaymentDate.localeCompare(b.expectedPaymentDate))
+    .slice(0, 8);
   const topReceivableClients = data.clients
     .map((client) => {
       const clientRows = receivableRows.filter((row) => row.clientId === client.id);
@@ -300,21 +328,43 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
 
   return (
     <>
-      <div className="grid grid-cols-6 gap-4">
-        <StatCard label="오늘 요청건" value={`${todayRequests.length}건`} />
-        <StatCard label="오늘 배치완료" value={`${completedToday}건`} tone="mint" />
-        <StatCard label="오늘 일부배치" value={`${partialToday}건`} />
-        <StatCard label="오늘 부족 인원" value={`${shortageToday}명`} />
-        <StatCard label="월 요청인원" value={`${monthRequestedCount}명`} />
-        <StatCard label="월 배치인원" value={`${monthAssignedCount}명`} tone="mint" />
+      <div className="grid grid-cols-4 gap-4">
+        <StatCard label="오늘 요청인원" value={`${todayRequestedCount}명`} />
+        <StatCard label="오늘 배치인원" value={`${todayAssignedCount}명`} tone="mint" />
+        <StatCard label="부족인원" value={`${shortageToday}명`} />
+        <StatCard label="서류 미비 근로자" value={`${missingDocumentWorkers.length}명`} />
+        <StatCard label="미수금 합계" value={formatWon(totalReceivable)} />
+        <StatCard label="결제 예정 금액" value={formatWon(paymentDueAmount)} tone="mint" />
+        <StatCard label="마감 예정 현장" value={`${closingDueSites.length}건`} />
+        <StatCard label="월 부족인원" value={`${monthShortageCount}명`} />
       </div>
 
       <div className="grid grid-cols-4 gap-4">
+        <StatCard label="월 요청인원" value={`${monthRequestedCount}명`} />
+        <StatCard label="월 배치인원" value={`${monthAssignedCount}명`} tone="mint" />
         <StatCard label="월 청구금액" value={formatWon(totalClaim)} />
         <StatCard label="월 입금금액" value={formatWon(totalPaid)} tone="mint" />
-        <StatCard label="전체 미수금" value={formatWon(totalReceivable)} />
-        <StatCard label="연체 현장" value={`${overdueRows.length}건`} />
       </div>
+
+      <Panel title="마감 예정 현장">
+        <DataTable>
+          <table className="w-full border-collapse">
+            <thead><tr>{["마감일", "거래처", "현장", "배치인원", "계산서"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+            <tbody>
+              {closingDueSites.map((item) => (
+                <tr key={item.site.id}>
+                  <td className={td}>{item.closingDate}</td>
+                  <td className={td}>{data.clients.find((client) => client.id === item.site.clientId)?.name}</td>
+                  <td className={td}>{item.site.siteName || item.site.name}</td>
+                  <td className={td}>{item.assignmentCount}명</td>
+                  <td className={td}>{item.site.invoiceIssueType === "ISSUED" ? "발행" : "미발행"}</td>
+                </tr>
+              ))}
+              {closingDueSites.length === 0 && <tr><td className={td} colSpan={5}>7일 내 마감 예정 현장이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </DataTable>
+      </Panel>
 
       <Panel title="거래처별 미수금 상위 5건">
         <DataTable>
@@ -336,8 +386,50 @@ function Dashboard({ data, selectedMonth }: { data: AppData; selectedMonth: stri
         </DataTable>
       </Panel>
 
-      <Panel title="최근 요청건 10건">
-        <RequestTable requests={recent} data={data} />
+      <Panel title="최근 배치/정산 현황">
+        <div className="grid grid-cols-2 gap-4">
+          <DataTable>
+            <table className="w-full border-collapse">
+              <thead><tr>{["근무일", "거래처", "현장", "근로자", "지급액"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+              <tbody>
+                {recentAssignments.map((assignment) => {
+                  const display = getDisplayAssignment(assignment, data);
+                  return (
+                    <tr key={assignment.id}>
+                      <td className={td}>{display.workDate}</td>
+                      <td className={td}>{data.clients.find((client) => client.id === display.clientId)?.name}</td>
+                      <td className={td}>{data.sites.find((site) => site.id === display.siteId)?.siteName || data.sites.find((site) => site.id === display.siteId)?.name}</td>
+                      <td className={td}>{data.workers.find((worker) => worker.id === display.workerId)?.name}</td>
+                      <td className={td}>{formatWon(display.paymentAmount)}</td>
+                    </tr>
+                  );
+                })}
+                {recentAssignments.length === 0 && <tr><td className={td} colSpan={5}>최근 배치 내역이 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </DataTable>
+          <DataTable>
+            <table className="w-full border-collapse">
+              <thead><tr>{["결제예정일", "거래처", "현장", "미수금액", "상태"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+              <tbody>
+                {settlementRows.map((row) => (
+                  <tr key={row.key}>
+                    <td className={td}>{row.expectedPaymentDate}</td>
+                    <td className={td}>{row.clientName}</td>
+                    <td className={td}>{row.siteName}</td>
+                    <td className={td}>{formatWon(row.balanceAmount)}</td>
+                    <td className={td}><ReceivableStatusBadge status={row.status} /></td>
+                  </tr>
+                ))}
+                {settlementRows.length === 0 && <tr><td className={td} colSpan={5}>정산/결제 예정 내역이 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </DataTable>
+        </div>
+      </Panel>
+
+      <Panel title="최근 요청건 8건">
+        <RequestTable requests={recentRequests} data={data} />
       </Panel>
 
       <Panel title="오늘 배치 현황표">

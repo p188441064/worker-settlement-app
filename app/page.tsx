@@ -48,7 +48,9 @@ const emptyClient: Client = {
   name: "",
   managerName: "",
   phone: "",
+  fax: "",
   email: "",
+  email2: "",
   closingDay: 25,
   paymentDay: 10,
   memo: ""
@@ -423,243 +425,286 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
 }
 
 function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
-  const firstSite = data.sites[0] ?? emptySite;
+  const firstClient = data.clients[0] ?? emptyClient;
+  const firstSite = data.sites.find((site) => site.clientId === firstClient.id) ?? data.sites[0] ?? emptySite;
   const [query, setQuery] = useState("");
+  const [selectedClientId, setSelectedClientId] = useState(firstClient.id);
   const [selectedSiteId, setSelectedSiteId] = useState(firstSite.id);
-  const [siteForm, setSiteForm] = useState<Site>(firstSite.id ? hydrateSite(firstSite, data.clients) : emptySite);
+  const [clientForm, setClientForm] = useState<Client>(firstClient.id ? firstClient : emptyClient);
+  const [siteForm, setSiteForm] = useState<Site>(firstSite.id ? hydrateSite(firstSite, data.clients) : { ...emptySite, clientId: firstClient.id, clientName: firstClient.name });
 
-  const filteredSites = data.sites.filter((site) => {
-    const item = hydrateSite(site, data.clients);
-    const target = [item.clientName, item.siteName, item.siteCode, item.managerName, item.displayName].join(" ").toLowerCase();
-    return target.includes(query.toLowerCase());
+  const filteredClients = data.clients.filter((client) => {
+    const clientText = [client.name, client.managerName, client.phone, client.fax, client.email, client.email2, client.memo].join(" ").toLowerCase();
+    const siteText = data.sites
+      .filter((site) => site.clientId === client.id)
+      .map((site) => [site.siteName, site.siteCode, site.managerName, site.phone, site.fax, site.settlementEmail1, site.settlementEmail2].join(" "))
+      .join(" ")
+      .toLowerCase();
+    const target = query.trim().toLowerCase();
+    return !target || clientText.includes(target) || siteText.includes(target);
   });
-  const treeClients = data.clients
-    .map((client) => ({
-      client,
-      sites: filteredSites.filter((site) => site.clientId === client.id || hydrateSite(site, data.clients).clientName === client.name)
-    }))
-    .filter((group) => group.sites.length > 0 || group.client.name.toLowerCase().includes(query.toLowerCase()));
+
+  const treeClients = filteredClients.map((client) => ({
+    client,
+    sites: data.sites
+      .filter((site) => site.clientId === client.id)
+      .filter((site) => {
+        const target = query.trim().toLowerCase();
+        if (!target) return true;
+        const item = hydrateSite(site, data.clients);
+        return [item.clientName, item.siteName, item.siteCode, item.managerName, item.displayName].join(" ").toLowerCase().includes(target) || client.name.toLowerCase().includes(target);
+      })
+  }));
+
+  const selectClient = (client: Client) => {
+    setSelectedClientId(client.id);
+    setClientForm({ ...emptyClient, ...client });
+    const first = data.sites.find((site) => site.clientId === client.id);
+    if (first) {
+      const hydrated = hydrateSite(first, data.clients);
+      setSelectedSiteId(hydrated.id);
+      setSiteForm(hydrated);
+    } else {
+      setSelectedSiteId("");
+      setSiteForm(createEmptySiteForClient(client));
+    }
+  };
 
   const selectSite = (site: Site) => {
     const next = hydrateSite(site, data.clients);
+    const client = data.clients.find((item) => item.id === next.clientId);
+    if (client) {
+      setSelectedClientId(client.id);
+      setClientForm({ ...emptyClient, ...client });
+    }
     setSelectedSiteId(next.id);
     setSiteForm(next);
   };
 
-  const startNew = () => {
+  const createEmptySiteForClient = (client = clientForm): Site => ({
+    ...emptySite,
+    id: "",
+    clientId: client.id,
+    clientName: client.name,
+    siteCode: `S-${Date.now().toString().slice(-5)}`,
+    phone: client.phone,
+    fax: client.fax,
+    settlementEmail1: client.email,
+    settlementEmail2: client.email2,
+    closingDay: client.closingDay,
+    paymentDay: client.paymentDay
+  });
+
+  const startNewClient = () => {
+    setSelectedClientId("");
     setSelectedSiteId("");
-    setSiteForm({ ...emptySite, id: "", siteCode: `S-${Date.now().toString().slice(-5)}` });
+    setClientForm(emptyClient);
+    setSiteForm(emptySite);
   };
 
-  const resetForm = () => {
-    if (!selectedSiteId) {
-      startNew();
-      return;
+  const startNewSite = () => {
+    if (!clientForm.id) return alert("현장을 등록할 거래처를 먼저 저장하거나 선택해 주세요.");
+    setSelectedSiteId("");
+    setSiteForm(createEmptySiteForClient(clientForm));
+  };
+
+  const setClientField = <K extends keyof Client>(key: K, value: Client[K]) => setClientForm({ ...clientForm, [key]: value });
+
+  const setSiteField = <K extends keyof Site>(key: K, value: Site[K]) => {
+    const next = { ...siteForm, [key]: value };
+    if (key === "siteName") {
+      next.displayName = `${next.clientName || clientForm.name || ""}${next.siteName ? `(${next.siteName})` : ""}`;
+      next.name = String(value);
     }
-    const selected = data.sites.find((site) => site.id === selectedSiteId);
-    if (selected) setSiteForm(hydrateSite(selected, data.clients));
+    setSiteForm(next);
+  };
+
+  const saveClient = () => {
+    if (!clientForm.name.trim()) return alert("거래처명을 입력해 주세요.");
+    const client: Client = {
+      ...emptyClient,
+      ...clientForm,
+      id: clientForm.id || createId("c"),
+      name: clientForm.name.trim(),
+      closingDay: Number(clientForm.closingDay) || 25,
+      paymentDay: Number(clientForm.paymentDay) || 10
+    };
+    const clients = clientForm.id ? data.clients.map((item) => (item.id === client.id ? client : item)) : [...data.clients, client];
+    const sites = data.sites.map((site) =>
+      site.clientId === client.id
+        ? {
+            ...site,
+            clientName: client.name,
+            displayName: `${client.name}(${site.siteName || site.name})`
+          }
+        : site
+    );
+    updateData({ ...data, clients, sites });
+    setSelectedClientId(client.id);
+    setClientForm(client);
+    if (!siteForm.clientId) setSiteForm(createEmptySiteForClient(client));
+  };
+
+  const deleteClient = () => {
+    if (!clientForm.id) return;
+    const relatedSiteIds = data.sites.filter((site) => site.clientId === clientForm.id).map((site) => site.id);
+    if (!confirm(`거래처와 하위 현장 ${relatedSiteIds.length}개를 삭제할까요? 관련 요청/배치/입금 내역도 함께 삭제됩니다.`)) return;
+    const clients = data.clients.filter((client) => client.id !== clientForm.id);
+    const sites = data.sites.filter((site) => site.clientId !== clientForm.id);
+    updateData({
+      ...data,
+      clients,
+      sites,
+      workEntries: data.workEntries.filter((entry) => !relatedSiteIds.includes(entry.siteId)),
+      workRequests: data.workRequests.filter((request) => request.clientId !== clientForm.id && !relatedSiteIds.includes(request.siteId)),
+      assignments: data.assignments.filter((assignment) => assignment.clientId !== clientForm.id && !relatedSiteIds.includes(assignment.siteId)),
+      receivablePayments: data.receivablePayments.filter((payment) => payment.clientId !== clientForm.id && !relatedSiteIds.includes(payment.siteId))
+    });
+    const next = clients[0] ?? emptyClient;
+    setSelectedClientId(next.id);
+    setClientForm(next);
+    const nextSite = sites.find((site) => site.clientId === next.id);
+    setSelectedSiteId(nextSite?.id ?? "");
+    setSiteForm(nextSite ? hydrateSite(nextSite, clients) : createEmptySiteForClient(next));
   };
 
   const saveSite = () => {
-    if (!siteForm.clientName.trim()) return alert("거래처명을 입력해 주세요.");
+    if (!clientForm.id) return alert("거래처를 먼저 선택하거나 저장해 주세요.");
     if (!siteForm.siteName.trim()) return alert("현장명을 입력해 주세요.");
-
-    const existingClient = data.clients.find((client) => client.name === siteForm.clientName.trim());
-    const clientId = (existingClient?.id ?? siteForm.clientId) || createId("c");
-    const displayName = `${siteForm.clientName.trim()}(${siteForm.siteName.trim()})`;
+    const siteName = siteForm.siteName.trim();
     const site: Site = {
       ...siteForm,
       id: siteForm.id || createId("s"),
-      clientId,
-      clientName: siteForm.clientName.trim(),
-      siteName: siteForm.siteName.trim(),
-      displayName,
-      name: siteForm.siteName.trim(),
-      code: siteForm.siteCode.trim()
+      clientId: clientForm.id,
+      clientName: clientForm.name,
+      siteName,
+      name: siteName,
+      siteCode: siteForm.siteCode.trim() || `S-${Date.now().toString().slice(-5)}`,
+      code: siteForm.siteCode.trim() || siteForm.code,
+      displayName: `${clientForm.name}(${siteName})`,
+      closingDay: Number(siteForm.closingDay) || clientForm.closingDay || 25,
+      paymentDay: Number(siteForm.paymentDay) || clientForm.paymentDay || 10,
+      invoiceDeductionRate: Number(siteForm.invoiceDeductionRate) || 0.1,
+      defaultUnitPrice: Number(siteForm.defaultUnitPrice) || 150000,
+      pensionMonthlyThreshold: Number(siteForm.pensionMonthlyThreshold) || 2200000
     };
-    const syncedClient: Client = {
-      id: clientId,
-      name: site.clientName,
-      managerName: site.managerName,
-      phone: site.phone,
-      email: site.settlementEmail1,
-      closingDay: site.closingDay,
-      paymentDay: site.paymentDay,
-      memo: site.memo
-    };
-    const clients = existingClient
-      ? data.clients.map((client) => (client.id === clientId ? syncedClient : client))
-      : [...data.clients, syncedClient];
     const sites = siteForm.id ? data.sites.map((item) => (item.id === site.id ? site : item)) : [...data.sites, site];
-
-    updateData({ ...data, clients, sites });
+    updateData({ ...data, sites });
     setSelectedSiteId(site.id);
     setSiteForm(site);
   };
 
   const deleteSite = () => {
     if (!siteForm.id) return;
-    if (!confirm("선택한 거래현장을 삭제할까요? 관련 출역내역도 함께 삭제됩니다.")) return;
+    if (!confirm("선택한 현장을 삭제할까요? 관련 요청/배치/입금 내역도 함께 삭제됩니다.")) return;
     const remainingSites = data.sites.filter((site) => site.id !== siteForm.id);
     updateData({
       ...data,
       sites: remainingSites,
       workEntries: data.workEntries.filter((entry) => entry.siteId !== siteForm.id),
       workRequests: data.workRequests.filter((request) => request.siteId !== siteForm.id),
-      assignments: data.assignments.filter((assignment) => assignment.siteId !== siteForm.id)
+      assignments: data.assignments.filter((assignment) => assignment.siteId !== siteForm.id),
+      receivablePayments: data.receivablePayments.filter((payment) => payment.siteId !== siteForm.id)
     });
-    const next = remainingSites[0] ? hydrateSite(remainingSites[0], data.clients) : emptySite;
-    setSelectedSiteId(next.id);
-    setSiteForm(next);
-  };
-
-  const setFormField = <K extends keyof Site>(key: K, value: Site[K]) => {
-    const next = { ...siteForm, [key]: value };
-    if (key === "clientName" || key === "siteName") {
-      next.displayName = `${next.clientName || ""}${next.siteName ? `(${next.siteName})` : ""}`;
-    }
-    setSiteForm(next);
+    const next = remainingSites.find((site) => site.clientId === clientForm.id);
+    setSelectedSiteId(next?.id ?? "");
+    setSiteForm(next ? hydrateSite(next, data.clients) : createEmptySiteForClient(clientForm));
   };
 
   return (
-    <div className="grid grid-cols-[340px_1fr] gap-5">
-      <Panel title="거래현장 검색">
+    <div className="grid grid-cols-[360px_1fr] gap-5">
+      <Panel title="거래처 · 현장 트리">
         <div className="grid gap-3">
           <div className="flex gap-2">
             <TextInput placeholder="거래처명, 현장명, 코드, 담당자" value={query} onChange={(e) => setQuery(e.target.value)} />
             <Button variant="secondary" onClick={() => setQuery(query.trim())}>검색</Button>
           </div>
-          <div className="h-[620px] overflow-y-auto rounded-md border border-navy-100 bg-white">
-            {treeClients.map(({ client, sites }) => (
-              <div key={client.id} className="border-b border-navy-100">
-                <div className="bg-navy-50 px-3 py-2 text-sm font-black text-navy-900">{client.name}</div>
-                {sites.map((site) => {
-                  const item = hydrateSite(site, data.clients);
-                  const active = selectedSiteId === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => selectSite(site)}
-                      className={`block w-full border-t border-navy-100 px-5 py-2 text-left text-sm transition ${
-                        active ? "bg-mint-100 text-navy-900" : "hover:bg-navy-50"
-                      }`}
-                    >
-                      <span className="block font-bold">└ {item.siteName}</span>
-                      <span className="mt-1 block text-xs text-slate-500">{item.siteCode} · {item.managerName || "담당자 미입력"}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={startNewClient}>거래처 신규</Button>
+            <Button variant="secondary" onClick={startNewSite} disabled={!clientForm.id}>현장 신규</Button>
+          </div>
+          <div className="h-[700px] overflow-y-auto rounded-md border border-navy-100 bg-white">
+            {treeClients.map(({ client, sites }) => {
+              const clientActive = selectedClientId === client.id;
+              return (
+                <div key={client.id} className="border-b border-navy-100">
+                  <button onClick={() => selectClient(client)} className={`block w-full px-3 py-2 text-left text-sm font-black transition ${clientActive ? "bg-navy-900 text-white" : "bg-navy-50 text-navy-900 hover:bg-navy-100"}`}>
+                    {client.name}
+                    <span className={`mt-1 block text-xs ${clientActive ? "text-navy-100" : "text-slate-500"}`}>{client.phone || "회사전화 미입력"} · 현장 {sites.length}개</span>
+                  </button>
+                  {sites.map((site) => {
+                    const item = hydrateSite(site, data.clients);
+                    const active = selectedSiteId === item.id;
+                    return (
+                      <button key={item.id} onClick={() => selectSite(site)} className={`block w-full border-t border-navy-100 px-5 py-2 text-left text-sm transition ${active ? "bg-mint-100 text-navy-900" : "hover:bg-navy-50"}`}>
+                        <span className="block font-bold">└ {item.siteName}</span>
+                        <span className="mt-1 block text-xs text-slate-500">{item.siteCode || "코드 없음"} · {item.invoiceIssueType === "ISSUED" ? "계산서 발행" : "계산서 미발행"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
             {treeClients.length === 0 && <p className="p-4 text-sm text-slate-500">검색 결과가 없습니다.</p>}
           </div>
         </div>
       </Panel>
 
-      <Panel
-        title="거래현장 상세정보"
-        actions={
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={startNew}>신규등록</Button>
-            <Button onClick={saveSite}>{siteForm.id ? "수정" : "저장"}</Button>
-            <Button variant="danger" onClick={deleteSite} disabled={!siteForm.id}>삭제</Button>
-            <Button variant="secondary" onClick={() => alert("출력 기능은 다음 단계에서 구현합니다.")}>출력</Button>
-            <Button variant="secondary" onClick={resetForm}>초기화</Button>
+      <div className="space-y-5">
+        <Panel title="거래처 상세정보" actions={<div className="flex gap-2"><Button onClick={saveClient}>{clientForm.id ? "거래처 수정" : "거래처 저장"}</Button><Button variant="danger" onClick={deleteClient} disabled={!clientForm.id}>거래처 삭제</Button></div>}>
+          <div className="grid grid-cols-4 gap-3">
+            <Field label="거래처명"><TextInput value={clientForm.name} onChange={(e) => setClientField("name", e.target.value)} /></Field>
+            <Field label="담당자명"><TextInput value={clientForm.managerName} onChange={(e) => setClientField("managerName", e.target.value)} /></Field>
+            <Field label="회사전화번호"><TextInput value={clientForm.phone} onChange={(e) => setClientField("phone", e.target.value)} /></Field>
+            <Field label="팩스번호"><TextInput value={clientForm.fax} onChange={(e) => setClientField("fax", e.target.value)} /></Field>
+            <Field label="이메일1"><TextInput value={clientForm.email} onChange={(e) => setClientField("email", e.target.value)} /></Field>
+            <Field label="이메일2"><TextInput value={clientForm.email2} onChange={(e) => setClientField("email2", e.target.value)} /></Field>
+            <Field label="마감일"><TextInput type="number" value={clientForm.closingDay} onChange={(e) => setClientField("closingDay", Number(e.target.value))} /></Field>
+            <Field label="결제일"><TextInput type="number" value={clientForm.paymentDay} onChange={(e) => setClientField("paymentDay", Number(e.target.value))} /></Field>
+            <div className="col-span-4"><Field label="비고"><TextInput value={clientForm.memo} onChange={(e) => setClientField("memo", e.target.value)} /></Field></div>
           </div>
-        }
-      >
-        <div className="grid grid-cols-4 gap-3">
-          <Field label="현장코드"><TextInput value={siteForm.siteCode} onChange={(e) => setFormField("siteCode", e.target.value)} /></Field>
-          <Field label="거래처명"><TextInput value={siteForm.clientName} onChange={(e) => setFormField("clientName", e.target.value)} /></Field>
-          <Field label="현장명"><TextInput value={siteForm.siteName} onChange={(e) => setFormField("siteName", e.target.value)} /></Field>
-          <Field label="표시명"><TextInput value={siteForm.displayName} onChange={(e) => setFormField("displayName", e.target.value)} /></Field>
+        </Panel>
 
-          <Field label="회사 전화번호"><TextInput value={siteForm.phone} onChange={(e) => setFormField("phone", e.target.value)} /></Field>
-          <Field label="팩스번호"><TextInput value={siteForm.fax} onChange={(e) => setFormField("fax", e.target.value)} /></Field>
-          <Field label="담당자명"><TextInput value={siteForm.managerName} onChange={(e) => setFormField("managerName", e.target.value)} /></Field>
-          <Field label="담당자 직책"><TextInput value={siteForm.managerTitle} onChange={(e) => setFormField("managerTitle", e.target.value)} /></Field>
-          <Field label="담당자 연락처"><TextInput value={siteForm.managerPhone} onChange={(e) => setFormField("managerPhone", e.target.value)} /></Field>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="결제일"><TextInput type="number" value={siteForm.paymentDay} onChange={(e) => setFormField("paymentDay", Number(e.target.value))} /></Field>
-            <Field label="마감일"><TextInput type="number" value={siteForm.closingDay} onChange={(e) => setFormField("closingDay", Number(e.target.value))} /></Field>
-          </div>
-
-          <Field label="정산 이메일 1"><TextInput value={siteForm.settlementEmail1} onChange={(e) => setFormField("settlementEmail1", e.target.value)} /></Field>
-          <Field label="정산 이메일 2"><TextInput value={siteForm.settlementEmail2} onChange={(e) => setFormField("settlementEmail2", e.target.value)} /></Field>
-          <Field label="기본단가"><TextInput type="number" value={siteForm.defaultUnitPrice} onChange={(e) => setFormField("defaultUnitPrice", Number(e.target.value))} /></Field>
-          <Field label="기본공제유형"><DeductionSelect value={siteForm.defaultDeductionType} onChange={(value) => setFormField("defaultDeductionType", value)} /></Field>
-          <Field label="계산서 발행 여부">
-            <SelectInput value={siteForm.invoiceIssueType} onChange={(e) => setFormField("invoiceIssueType", e.target.value as Site["invoiceIssueType"])}>
-              <option value="ISSUED">계산서 발행</option>
-              <option value="NOT_ISSUED">계산서 미발행</option>
-            </SelectInput>
-          </Field>
-          <Field label="알선수수료율"><TextInput type="number" step="0.01" value={siteForm.invoiceDeductionRate} onChange={(e) => setFormField("invoiceDeductionRate", Number(e.target.value))} /></Field>
-          <Field label="건강보험 판단 기준">
-            <SelectInput value={siteForm.healthInsuranceBasis} onChange={(e) => setFormField("healthInsuranceBasis", e.target.value as Site["healthInsuranceBasis"])}>
-              <option value="CLIENT_BASED">거래처 기준</option>
-              <option value="SITE_BASED">현장 기준</option>
-              <option value="MANUAL">수동</option>
-            </SelectInput>
-          </Field>
-          <Field label="건강보험 출력 기준">
-            <SelectInput value={siteForm.healthInsuranceOutputBasis} onChange={(e) => setFormField("healthInsuranceOutputBasis", e.target.value as Site["healthInsuranceOutputBasis"])}>
-              <option value="MONTH_FIRST_DAY">매월 1일 기준</option>
-              <option value="DATE_BASED">실제 날짜 기준</option>
-              <option value="FIRST_MONTH_NOT_APPLY">첫달 미부과</option>
-              <option value="MANUAL">수동</option>
-            </SelectInput>
-          </Field>
-          <Field label="국민연금 출력 기준">
-            <SelectInput value={siteForm.pensionOutputBasis} onChange={(e) => setFormField("pensionOutputBasis", e.target.value as Site["pensionOutputBasis"])}>
-              <option value="MONTH_FIRST_DAY">매월 1일 기준</option>
-              <option value="DATE_BASED">실제 날짜 기준</option>
-              <option value="FIRST_MONTH_NOT_APPLY">첫달 미부과</option>
-              <option value="MANUAL">수동</option>
-            </SelectInput>
-          </Field>
-          <Field label="첫달 보험 처리">
-            <SelectInput value={siteForm.firstMonthInsuranceHandling} onChange={(e) => setFormField("firstMonthInsuranceHandling", e.target.value as Site["firstMonthInsuranceHandling"])}>
-              <option value="APPLY">첫달도 반영</option>
-              <option value="NOT_APPLY">첫달 미부과·비희망</option>
-              <option value="MANUAL">수동</option>
-            </SelectInput>
-          </Field>
-          <Field label="국민연금 기준금액"><TextInput type="number" value={siteForm.pensionMonthlyThreshold} onChange={(e) => setFormField("pensionMonthlyThreshold", Number(e.target.value))} /></Field>
-
-          <div className="col-span-2">
-            <Field label="주소"><TextInput value={siteForm.address} onChange={(e) => setFormField("address", e.target.value)} /></Field>
-          </div>
-          <div className="col-span-2">
-            <Field label="기본 작업내용"><TextInput value={siteForm.defaultTaskDescription} onChange={(e) => setFormField("defaultTaskDescription", e.target.value)} /></Field>
-          </div>
-
-          <div className="col-span-4">
-            <Field label="비고"><TextInput value={siteForm.memo} onChange={(e) => setFormField("memo", e.target.value)} /></Field>
-          </div>
-
-          <div className="col-span-4">
-            <Field label="약도/오시는 길"><TextArea value={siteForm.directions} onChange={(e) => setFormField("directions", e.target.value)} className="min-h-28" /></Field>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-            <input type="checkbox" checked={siteForm.carryOverPreviousMonth} onChange={(e) => setFormField("carryOverPreviousMonth", e.target.checked)} />
-            전월 연속근로 반영
-          </label>
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-            <input type="checkbox" checked={siteForm.isActive} onChange={(e) => setFormField("isActive", e.target.checked)} />
-            활성상태
-          </label>
-          <div className="col-span-2 flex items-center gap-3 rounded-md bg-navy-50 px-3 text-sm text-navy-800">
-            <b>목록 표시</b>
-            <span>{siteForm.displayName || "거래처명(현장명)"}</span>
-          </div>
-        </div>
-      </Panel>
+        <Panel title="현장 상세정보" actions={<div className="flex gap-2"><Button variant="secondary" onClick={startNewSite} disabled={!clientForm.id}>현장 신규</Button><Button onClick={saveSite} disabled={!clientForm.id}>{siteForm.id ? "현장 수정" : "현장 저장"}</Button><Button variant="danger" onClick={deleteSite} disabled={!siteForm.id}>현장 삭제</Button></div>}>
+          {clientForm.id ? (
+            <div className="grid grid-cols-4 gap-3">
+              <Field label="소속 거래처"><TextInput value={clientForm.name} readOnly /></Field>
+              <Field label="현장코드"><TextInput value={siteForm.siteCode} onChange={(e) => setSiteField("siteCode", e.target.value)} /></Field>
+              <Field label="현장명"><TextInput value={siteForm.siteName} onChange={(e) => setSiteField("siteName", e.target.value)} /></Field>
+              <Field label="표시명"><TextInput value={siteForm.displayName} onChange={(e) => setSiteField("displayName", e.target.value)} /></Field>
+              <Field label="회사전화번호"><TextInput value={siteForm.phone} onChange={(e) => setSiteField("phone", e.target.value)} /></Field>
+              <Field label="팩스번호"><TextInput value={siteForm.fax} onChange={(e) => setSiteField("fax", e.target.value)} /></Field>
+              <Field label="담당자명"><TextInput value={siteForm.managerName} onChange={(e) => setSiteField("managerName", e.target.value)} /></Field>
+              <Field label="담당자 직책"><TextInput value={siteForm.managerTitle} onChange={(e) => setSiteField("managerTitle", e.target.value)} /></Field>
+              <Field label="담당자 연락처"><TextInput value={siteForm.managerPhone} onChange={(e) => setSiteField("managerPhone", e.target.value)} /></Field>
+              <Field label="이메일1"><TextInput value={siteForm.settlementEmail1} onChange={(e) => setSiteField("settlementEmail1", e.target.value)} /></Field>
+              <Field label="이메일2"><TextInput value={siteForm.settlementEmail2} onChange={(e) => setSiteField("settlementEmail2", e.target.value)} /></Field>
+              <div className="grid grid-cols-2 gap-2"><Field label="마감일"><TextInput type="number" value={siteForm.closingDay} onChange={(e) => setSiteField("closingDay", Number(e.target.value))} /></Field><Field label="결제일"><TextInput type="number" value={siteForm.paymentDay} onChange={(e) => setSiteField("paymentDay", Number(e.target.value))} /></Field></div>
+              <Field label="기본단가"><TextInput type="number" value={siteForm.defaultUnitPrice} onChange={(e) => setSiteField("defaultUnitPrice", Number(e.target.value))} /></Field>
+              <Field label="기본공제유형"><DeductionSelect value={siteForm.defaultDeductionType} onChange={(value) => setSiteField("defaultDeductionType", value)} /></Field>
+              <Field label="계산서 발행 여부"><SelectInput value={siteForm.invoiceIssueType} onChange={(e) => setSiteField("invoiceIssueType", e.target.value as Site["invoiceIssueType"])}><option value="ISSUED">계산서 발행</option><option value="NOT_ISSUED">계산서 미발행</option></SelectInput></Field>
+              <Field label="알선수수료율"><TextInput type="number" step="0.01" value={siteForm.invoiceDeductionRate} onChange={(e) => setSiteField("invoiceDeductionRate", Number(e.target.value))} /></Field>
+              <Field label="건강보험 판단 기준"><SelectInput value={siteForm.healthInsuranceBasis} onChange={(e) => setSiteField("healthInsuranceBasis", e.target.value as Site["healthInsuranceBasis"])}><option value="CLIENT_BASED">거래처 기준</option><option value="SITE_BASED">현장 기준</option><option value="MANUAL">수동</option></SelectInput></Field>
+              <Field label="건강보험 출력 기준"><SelectInput value={siteForm.healthInsuranceOutputBasis} onChange={(e) => setSiteField("healthInsuranceOutputBasis", e.target.value as Site["healthInsuranceOutputBasis"])}><option value="MONTH_FIRST_DAY">매월 1일 기준</option><option value="DATE_BASED">실제 날짜 기준</option><option value="FIRST_MONTH_NOT_APPLY">첫달 미부과</option><option value="MANUAL">수동</option></SelectInput></Field>
+              <Field label="국민연금 출력 기준"><SelectInput value={siteForm.pensionOutputBasis} onChange={(e) => setSiteField("pensionOutputBasis", e.target.value as Site["pensionOutputBasis"])}><option value="MONTH_FIRST_DAY">매월 1일 기준</option><option value="DATE_BASED">실제 날짜 기준</option><option value="FIRST_MONTH_NOT_APPLY">첫달 미부과</option><option value="MANUAL">수동</option></SelectInput></Field>
+              <Field label="첫달 보험 처리"><SelectInput value={siteForm.firstMonthInsuranceHandling} onChange={(e) => setSiteField("firstMonthInsuranceHandling", e.target.value as Site["firstMonthInsuranceHandling"])}><option value="APPLY">첫달도 반영</option><option value="NOT_APPLY">첫달 미부과·비희망</option><option value="MANUAL">수동</option></SelectInput></Field>
+              <Field label="국민연금 기준금액"><TextInput type="number" value={siteForm.pensionMonthlyThreshold} onChange={(e) => setSiteField("pensionMonthlyThreshold", Number(e.target.value))} /></Field>
+              <div className="col-span-2"><Field label="주소"><TextInput value={siteForm.address} onChange={(e) => setSiteField("address", e.target.value)} /></Field></div>
+              <div className="col-span-2"><Field label="기본 작업내용"><TextInput value={siteForm.defaultTaskDescription} onChange={(e) => setSiteField("defaultTaskDescription", e.target.value)} /></Field></div>
+              <div className="col-span-4"><Field label="비고"><TextInput value={siteForm.memo} onChange={(e) => setSiteField("memo", e.target.value)} /></Field></div>
+              <div className="col-span-4"><Field label="약도/오시는 길"><TextArea value={siteForm.directions} onChange={(e) => setSiteField("directions", e.target.value)} className="min-h-28" /></Field></div>
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-600"><input type="checkbox" checked={siteForm.carryOverPreviousMonth} onChange={(e) => setSiteField("carryOverPreviousMonth", e.target.checked)} />전월 연속근로 반영</label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-600"><input type="checkbox" checked={siteForm.isActive} onChange={(e) => setSiteField("isActive", e.target.checked)} />활성상태</label>
+              <div className="col-span-2 flex items-center gap-3 rounded-md bg-navy-50 px-3 text-sm text-navy-800"><b>현장별 정산 연결</b><span>{siteForm.id ? `${clientForm.name} / ${siteForm.siteName}` : "저장 후 월말 정산 현장 선택에 표시됩니다."}</span></div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">거래처를 먼저 선택하거나 저장해 주세요.</p>
+          )}
+        </Panel>
+      </div>
     </div>
   );
 }
-
 function AttendanceView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
   const firstClient = data.clients[0]?.id ?? "";
   const firstSite = data.sites.find((site) => site.clientId === firstClient)?.id ?? "";

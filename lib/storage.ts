@@ -1,6 +1,6 @@
 "use client";
 
-import { AppData, CalculationRule, Site, WorkAssignment, WorkEntry, WorkRequest, Worker } from "./types";
+import { AppData, CalculationRule, Client, Site, WorkAssignment, WorkEntry, WorkRequest, Worker } from "./types";
 import { SCHEMA_VERSION, sampleData } from "./sample-data";
 import { ceilWon, getWorkerBaseAmount, normalizeRequestStatuses } from "./calculations";
 import { calculatePayrollDeduction } from "./payrollRules";
@@ -38,6 +38,20 @@ export function createId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function migrateClient(client: Partial<Client>): Client {
+  return {
+    id: client.id || createId("c"),
+    name: client.name || "샘플 거래처",
+    managerName: client.managerName || "",
+    phone: client.phone || "",
+    fax: client.fax || "",
+    email: client.email || "",
+    email2: client.email2 || "",
+    closingDay: client.closingDay || 25,
+    paymentDay: client.paymentDay || 10,
+    memo: client.memo || ""
+  };
+}
 function createSignatureDataUrl(name: string, style: "STAMP" | "SIGN") {
   const svg =
     style === "STAMP"
@@ -202,7 +216,7 @@ function convertEntriesToRequestsAndAssignments(data: AppData, entries: WorkEntr
 }
 
 export function migrateAppData(partial: Partial<AppData>): AppData {
-  const clients = partial.clients?.length ? partial.clients : sampleData.clients;
+  const clients = (partial.clients?.length ? partial.clients : sampleData.clients).map(migrateClient);
   const workers = (partial.workers?.length ? partial.workers : sampleData.workers).map(migrateWorker);
   const sites = (partial.sites?.length ? partial.sites : sampleData.sites).map((site) => {
     const client = clients.find((item) => item.id === site.clientId);

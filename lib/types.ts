@@ -51,7 +51,9 @@ export interface Client {
   name: string;
   managerName: string;
   phone: string;
+  fax: string;
   email: string;
+  email2: string;
   closingDay: number;
   paymentDay: number;
   memo: string;

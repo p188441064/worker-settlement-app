@@ -18,9 +18,9 @@ export const sampleWorkers: Worker[] = [
 ];
 
 export const sampleClients: Client[] = [
-  { id: "c-001", name: "동해건설", managerName: "문상현", phone: "02-2000-3101", email: "sample1@example.test", closingDay: 25, paymentDay: 10, memo: "월 1회 정산" },
-  { id: "c-002", name: "새봄산업", managerName: "류정아", phone: "02-2000-3102", email: "sample2@example.test", closingDay: 30, paymentDay: 15, memo: "현장별 명세 요청" },
-  { id: "c-003", name: "한빛개발", managerName: "남기호", phone: "02-2000-3103", email: "sample3@example.test", closingDay: 20, paymentDay: 5, memo: "세부 비고 확인" }
+  { id: "c-001", name: "동해건설", managerName: "문상현", phone: "02-2000-3101", fax: "", email: "sample1@example.test", email2: "", closingDay: 25, paymentDay: 10, memo: "월 1회 정산" },
+  { id: "c-002", name: "새봄산업", managerName: "류정아", phone: "02-2000-3102", fax: "", email: "sample2@example.test", email2: "", closingDay: 30, paymentDay: 15, memo: "현장별 명세 요청" },
+  { id: "c-003", name: "한빛개발", managerName: "남기호", phone: "02-2000-3103", fax: "", email: "sample3@example.test", email2: "", closingDay: 20, paymentDay: 5, memo: "세부 비고 확인" }
 ];
 
 function site(base: Partial<Site> & Pick<Site, "id" | "clientId" | "clientName" | "siteName" | "siteCode" | "defaultUnitPrice" | "defaultDeductionType" | "invoiceIssueType" | "healthInsuranceOutputBasis">): Site {

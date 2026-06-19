@@ -312,6 +312,18 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
     .filter((worker) => !missingOnly || worker.documentStatus !== "완료");
   const editing = Boolean(form.id);
 
+  const updateWorkerForm = (next: Worker) => setForm({ ...next, documentStatus: getWorkerDocumentStatus(next) });
+
+  const editWorker = (worker: Worker) => {
+    const next = {
+      ...worker,
+      documentStatus: getWorkerDocumentStatus(worker),
+      signatureDataUrl: worker.signatureDataUrl || createSignatureDataUrl(worker.name, worker.signatureStyle || "STAMP")
+    };
+    setForm(next);
+    setShowApplication(false);
+  };
+
   const save = () => {
     if (!form.name.trim()) return alert("근로자명을 입력해 주세요.");
     const worker = {
@@ -324,21 +336,26 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
     };
     updateData({ ...data, workers: editing ? data.workers.map((item) => (item.id === worker.id ? worker : item)) : [...data.workers, worker] });
     setForm(emptyWorker);
+    setShowApplication(false);
   };
 
   const setResidentNumber = (residentNumber: string) => {
     const birthDate = birthDateFromResidentNumber(residentNumber) || form.birthDate;
-    setForm({ ...form, residentNumber, birthDate, ageGroup: getAgeGroupByWorkDate(birthDate, today) });
+    updateWorkerForm({ ...form, residentNumber, birthDate, ageGroup: getAgeGroupByWorkDate(birthDate, today) });
   };
 
   const setFile = (key: keyof Pick<Worker, "idCardFrontImage" | "idCardBackImage" | "safetyCertificateImage" | "otherAttachment">, file?: File) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const next = { ...form, [key]: String(reader.result) };
-      setForm({ ...next, documentStatus: getWorkerDocumentStatus(next as Worker) });
+      updateWorkerForm({ ...form, [key]: String(reader.result) } as Worker);
     };
     reader.readAsDataURL(file);
+  };
+
+  const deleteFile = (key: keyof Pick<Worker, "idCardFrontImage" | "idCardBackImage" | "safetyCertificateImage" | "otherAttachment">) => {
+    const next = { ...form, [key]: undefined } as Worker;
+    updateWorkerForm(next);
   };
 
   const downloadFile = (dataUrl?: string, filename = "attachment") => {
@@ -347,6 +364,12 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
     link.href = dataUrl;
     link.download = filename;
     link.click();
+  };
+
+  const printWorkerDocument = () => {
+    if (!form.name.trim()) return alert("출력할 근로자를 선택하거나 이름을 입력해 주세요.");
+    setShowApplication(true);
+    window.setTimeout(() => window.print(), 80);
   };
 
   const remove = (id: string) => {
@@ -363,36 +386,43 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
     <div className="grid grid-cols-[360px_1fr] gap-5">
       <Panel title={editing ? "근로자 수정" : "근로자 신규 등록"}>
         <div className="grid gap-3">
-          <Field label="근로자코드"><TextInput value={form.workerCode || "자동생성"} onChange={(e) => setForm({ ...form, workerCode: e.target.value })} /></Field>
-          <Field label="이름"><TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+          <Field label="근로자코드"><TextInput value={form.workerCode || "자동생성"} onChange={(e) => updateWorkerForm({ ...form, workerCode: e.target.value })} /></Field>
+          <Field label="이름"><TextInput value={form.name} onChange={(e) => updateWorkerForm({ ...form, name: e.target.value, signatureDataUrl: form.signatureDataUrl ? form.signatureDataUrl : createSignatureDataUrl(e.target.value, form.signatureStyle) })} /></Field>
           <Field label="주민등록번호"><TextInput value={form.residentNumber} onChange={(e) => setResidentNumber(e.target.value)} placeholder="예: 900101-1******" /></Field>
-          <Field label="생년월일 / 만 나이"><TextInput type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value, ageGroup: getAgeGroupByWorkDate(e.target.value, today) })} /></Field>
+          <Field label="생년월일 / 만 나이"><TextInput type="date" value={form.birthDate} onChange={(e) => updateWorkerForm({ ...form, birthDate: e.target.value, ageGroup: getAgeGroupByWorkDate(e.target.value, today) })} /></Field>
           <div className="rounded-md bg-mint-50 p-2 text-sm font-bold">{calculateAge(form.birthDate)}세 · {ageGroupLabel(getAgeGroupByWorkDate(form.birthDate, today))}</div>
-          <Field label="일반전화"><TextInput value={form.landline} onChange={(e) => setForm({ ...form, landline: e.target.value })} /></Field>
-          <Field label="휴대폰"><TextInput value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value, phone: e.target.value })} /></Field>
-          <Field label="주소"><TextInput value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
+          <Field label="일반전화"><TextInput value={form.landline} onChange={(e) => updateWorkerForm({ ...form, landline: e.target.value })} /></Field>
+          <Field label="휴대폰"><TextInput value={form.mobile} onChange={(e) => updateWorkerForm({ ...form, mobile: e.target.value, phone: e.target.value })} /></Field>
+          <Field label="주소"><TextInput value={form.address} onChange={(e) => updateWorkerForm({ ...form, address: e.target.value })} /></Field>
           <Button variant="secondary" onClick={() => alert("주소검색은 다음 단계에서 외부 주소 API 없이 수동입력으로 대체합니다.")}>주소검색</Button>
-          <Field label="등록일"><TextInput type="date" value={form.registrationDate} onChange={(e) => setForm({ ...form, registrationDate: e.target.value })} /></Field>
-          <Field label="직종"><TextInput value={form.jobType} onChange={(e) => setForm({ ...form, jobType: e.target.value })} /></Field>
-          <Field label="경력"><TextInput value={form.career} onChange={(e) => setForm({ ...form, career: e.target.value })} /></Field>
-          <Field label="자격증"><TextInput value={form.certifications} onChange={(e) => setForm({ ...form, certifications: e.target.value })} /></Field>
+          <Field label="등록일"><TextInput type="date" value={form.registrationDate} onChange={(e) => updateWorkerForm({ ...form, registrationDate: e.target.value })} /></Field>
+          <Field label="직종"><TextInput value={form.jobType} onChange={(e) => updateWorkerForm({ ...form, jobType: e.target.value })} /></Field>
+          <Field label="경력"><TextInput value={form.career} onChange={(e) => updateWorkerForm({ ...form, career: e.target.value })} /></Field>
+          <Field label="자격증"><TextInput value={form.certifications} onChange={(e) => updateWorkerForm({ ...form, certifications: e.target.value })} /></Field>
           <Field label="서류상태">
             <SelectInput value={getWorkerDocumentStatus(form)} disabled>
               <option>완료</option><option>일부누락</option><option>미확인</option>
             </SelectInput>
           </Field>
-          <WorkerFileField label="신분증 앞면" value={form.idCardFrontImage} onChange={(file) => setFile("idCardFrontImage", file)} onDelete={() => setForm({ ...form, idCardFrontImage: undefined })} onDownload={() => downloadFile(form.idCardFrontImage, `${form.name}_신분증앞면.png`)} />
-          <WorkerFileField label="신분증 뒷면" value={form.idCardBackImage} onChange={(file) => setFile("idCardBackImage", file)} onDelete={() => setForm({ ...form, idCardBackImage: undefined })} onDownload={() => downloadFile(form.idCardBackImage, `${form.name}_신분증뒷면.png`)} />
-          <WorkerFileField label="기초안전보건교육 이수증" value={form.safetyCertificateImage} onChange={(file) => setFile("safetyCertificateImage", file)} onDelete={() => setForm({ ...form, safetyCertificateImage: undefined })} onDownload={() => downloadFile(form.safetyCertificateImage, `${form.name}_이수증.png`)} />
-          <WorkerFileField label="기타 첨부파일" value={form.otherAttachment} onChange={(file) => setFile("otherAttachment", file)} onDelete={() => setForm({ ...form, otherAttachment: undefined })} onDownload={() => downloadFile(form.otherAttachment, `${form.name}_기타첨부.png`)} />
-          <Field label="서명 스타일"><SelectInput value={form.signatureStyle} onChange={(e) => setForm({ ...form, signatureStyle: e.target.value as Worker["signatureStyle"], signatureDataUrl: createSignatureDataUrl(form.name, e.target.value as Worker["signatureStyle"]) })}><option value="STAMP">막도장</option><option value="SIGN">전자서명</option></SelectInput></Field>
-          <div className="rounded-md border border-navy-100 p-2">{form.signatureDataUrl && <img src={form.signatureDataUrl} alt="서명 미리보기" className="h-20" />}<Button variant="secondary" onClick={() => setForm({ ...form, signatureDataUrl: createSignatureDataUrl(form.name, form.signatureStyle) })}>다시 생성</Button></div>
-          <Field label="비고"><TextInput value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} /></Field>
+          <div className="grid gap-2 rounded-md bg-navy-50 p-3 text-xs font-semibold text-slate-600">
+            <span>완료 기준: 신분증 앞면, 신분증 뒷면, 이수증이 모두 등록되어야 합니다.</span>
+            <span>현재 상태: {getWorkerDocumentStatus(form)}</span>
+          </div>
+          <WorkerFileField label="신분증 앞면" value={form.idCardFrontImage} onChange={(file) => setFile("idCardFrontImage", file)} onDelete={() => deleteFile("idCardFrontImage")} onDownload={() => downloadFile(form.idCardFrontImage, `${form.name}_신분증앞면.png`)} />
+          <WorkerFileField label="신분증 뒷면" value={form.idCardBackImage} onChange={(file) => setFile("idCardBackImage", file)} onDelete={() => deleteFile("idCardBackImage")} onDownload={() => downloadFile(form.idCardBackImage, `${form.name}_신분증뒷면.png`)} />
+          <WorkerFileField label="기초안전보건교육 이수증" value={form.safetyCertificateImage} onChange={(file) => setFile("safetyCertificateImage", file)} onDelete={() => deleteFile("safetyCertificateImage")} onDownload={() => downloadFile(form.safetyCertificateImage, `${form.name}_이수증.png`)} />
+          <WorkerFileField label="기타 첨부파일" value={form.otherAttachment} onChange={(file) => setFile("otherAttachment", file)} onDelete={() => deleteFile("otherAttachment")} onDownload={() => downloadFile(form.otherAttachment, `${form.name}_기타첨부.png`)} />
+          <Field label="서명 스타일"><SelectInput value={form.signatureStyle} onChange={(e) => updateWorkerForm({ ...form, signatureStyle: e.target.value as Worker["signatureStyle"], signatureDataUrl: createSignatureDataUrl(form.name, e.target.value as Worker["signatureStyle"]) })}><option value="STAMP">막도장</option><option value="SIGN">전자서명</option></SelectInput></Field>
+          <div className="rounded-md border border-navy-100 p-2">
+            {form.signatureDataUrl ? <img src={form.signatureDataUrl} alt="서명 미리보기" className="h-20" /> : <p className="mb-2 text-xs text-slate-400">이름 입력 후 자동 생성됩니다.</p>}
+            <Button variant="secondary" onClick={() => updateWorkerForm({ ...form, signatureDataUrl: createSignatureDataUrl(form.name, form.signatureStyle) })}>도장/서명 다시 생성</Button>
+          </div>
+          <Field label="비고"><TextInput value={form.memo} onChange={(e) => updateWorkerForm({ ...form, memo: e.target.value })} /></Field>
           <div className="flex flex-wrap gap-2">
             <Button onClick={save}>{editing ? "수정 저장" : "등록"}</Button>
-            <Button variant="secondary" onClick={() => setForm(emptyWorker)}>초기화</Button>
+            <Button variant="secondary" onClick={() => { setForm(emptyWorker); setShowApplication(false); }}>초기화</Button>
             <Button variant="secondary" onClick={() => setShowApplication((value) => !value)}>신상명세서 미리보기</Button>
-            <Button variant="secondary" onClick={() => window.print()}>출력/PDF/인쇄</Button>
+            <Button variant="secondary" onClick={printWorkerDocument}>신상명세서 출력/PDF</Button>
           </div>
         </div>
       </Panel>
@@ -412,7 +442,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
               {workers.map((worker) => (
                 <tr key={worker.id}>
                   <td className={td}>{worker.workerCode}</td><td className={td}>{worker.name}</td><td className={td}>{worker.birthDate}</td><td className={td}>{calculateAge(worker.birthDate)}</td><td className={td}>{ageGroupLabel(getAgeGroupByWorkDate(worker.birthDate, today))}</td><td className={td}>{worker.mobile || worker.phone}</td><td className={td}>{worker.jobType}</td><td className={td}>{worker.registrationDate}</td><td className={td}><Badge tone={docTone(worker.documentStatus)}>{worker.documentStatus}</Badge></td><td className={td}>{getLatestWorkDate(worker.id, data.assignments)}</td>
-                  <td className={`${td} space-x-2`}><Button variant="secondary" onClick={() => setForm(worker)}>수정</Button><Button variant="danger" onClick={() => remove(worker.id)}>삭제</Button></td>
+                  <td className={`${td} space-x-2`}><Button variant="secondary" onClick={() => editWorker(worker)}>수정</Button><Button variant="danger" onClick={() => remove(worker.id)}>삭제</Button></td>
                 </tr>
               ))}
             </tbody>
@@ -423,7 +453,6 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
     </div>
   );
 }
-
 function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
   const firstClient = data.clients[0] ?? emptyClient;
   const firstSite = data.sites.find((site) => site.clientId === firstClient.id) ?? data.sites[0] ?? emptySite;
@@ -1834,7 +1863,7 @@ function WorkerFileField({
 
 function WorkerApplicationPreview({ worker }: { worker: Worker }) {
   return (
-    <div className="mx-auto max-w-3xl border border-navy-200 bg-white p-8 text-navy-900 shadow-sm print:shadow-none">
+    <div className="print-area print-page print-paper mx-auto max-w-3xl border border-navy-200 bg-white p-8 text-navy-900 shadow-sm print:shadow-none">
       <h2 className="mb-6 text-center text-2xl font-black">근로자 신상명세서</h2>
       <table className="mb-5 w-full border-collapse text-sm">
         <tbody>

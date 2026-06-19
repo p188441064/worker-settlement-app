@@ -2,7 +2,7 @@
 
 import { AppData, CalculationRule, Site, WorkAssignment, WorkEntry, WorkRequest, Worker } from "./types";
 import { SCHEMA_VERSION, sampleData } from "./sample-data";
-import { ceilWon, normalizeRequestStatuses } from "./calculations";
+import { ceilWon, getWorkerBaseAmount, normalizeRequestStatuses } from "./calculations";
 import { calculatePayrollDeduction } from "./payrollRules";
 
 const STORAGE_KEY = "worker-settlement-app-data-v1";
@@ -126,6 +126,11 @@ function migrateSite(site: Partial<Site>, clientName = ""): Site {
 
 function migrateRule(rule: Partial<CalculationRule>): CalculationRule {
   const unitPrice = rule.unitPrice || 150000;
+  const brokerageFeeRate = rule.brokerageFeeRate ?? 0.1;
+  const base = getWorkerBaseAmount(unitPrice, brokerageFeeRate);
+  const workerBaseAmount = rule.workerBaseAmount ?? base.workerBaseAmount;
+  const brokerageFee = rule.brokerageFee ?? base.brokerageFee;
+  const invoiceIssueType = rule.invoiceIssueType || "NOT_ISSUED";
   const employmentInsurance = ceilWon(rule.employmentInsurance || 0);
   const healthInsurance = ceilWon(rule.healthInsurance || 0);
   const nationalPension = ceilWon(rule.nationalPension || 0);
@@ -136,17 +141,20 @@ function migrateRule(rule: Partial<CalculationRule>): CalculationRule {
     deductionType: rule.deductionType || "고용보험",
     ageGroup: rule.ageGroup || "ALL",
     unitPrice,
-    laborCost: rule.laborCost || unitPrice,
+    brokerageFeeRate,
+    brokerageFee,
+    workerBaseAmount,
+    invoiceIssueType,
+    laborCost: rule.laborCost || workerBaseAmount,
     employmentInsurance,
     healthInsurance,
     nationalPension,
     longTermCare,
     deductionAmount,
-    paymentAmount: rule.paymentAmount ?? unitPrice - deductionAmount,
+    paymentAmount: rule.paymentAmount ?? workerBaseAmount - deductionAmount,
     memo: rule.memo || ""
   };
 }
-
 function convertEntriesToRequestsAndAssignments(data: AppData, entries: WorkEntry[]) {
   const requests: WorkRequest[] = [];
   const assignments: WorkAssignment[] = [];
@@ -225,7 +233,7 @@ export function migrateAppData(partial: Partial<AppData>): AppData {
     ...assignment,
     invoiceIssueType: assignment.invoiceIssueType || sites.find((site) => site.id === assignment.siteId)?.invoiceIssueType || "ISSUED",
     invoiceDeductionRate: assignment.invoiceDeductionRate ?? sites.find((site) => site.id === assignment.siteId)?.invoiceDeductionRate ?? 0.1,
-    deductionBaseAmount: assignment.deductionBaseAmount || Math.round(assignment.unitPrice * (assignment.invoiceIssueType === "ISSUED" ? 0.9 : 1)),
+    deductionBaseAmount: assignment.deductionBaseAmount || getWorkerBaseAmount(assignment.unitPrice, assignment.invoiceDeductionRate ?? 0.1).workerBaseAmount,
     employmentInsurance: assignment.employmentInsurance ?? 0,
     healthInsurance: assignment.healthInsurance ?? 0,
     nationalPension: assignment.nationalPension ?? 0,

@@ -6,7 +6,7 @@ import {
   Worker,
   DeductionType
 } from "./types";
-import { ceilWon, findCalculationRule, getAgeGroupByWorkDate, isSameMonth } from "./calculations";
+import { ceilWon, findCalculationRule, floorWon, getAgeGroupByWorkDate, getWorkerBaseAmount, isSameMonth } from "./calculations";
 
 export interface ManualDeductionInput {
   employmentInsurance?: number;
@@ -67,15 +67,13 @@ function hasPreviousMonthClientWork(workDate: string, clientId: string, workerId
 
 export function getDeductionBaseAmount(site: Site, unitPrice: number) {
   const invoiceDeductionRate = site.invoiceDeductionRate ?? 0.1;
-  const deductionBaseAmount =
-    site.invoiceIssueType === "ISSUED" ? Math.round(unitPrice * (1 - invoiceDeductionRate)) : unitPrice;
+  const { brokerageFee, workerBaseAmount } = getWorkerBaseAmount(unitPrice, invoiceDeductionRate);
   const reason =
     site.invoiceIssueType === "ISSUED"
-      ? `계산서 발행 현장이므로 단가의 ${Math.round((1 - invoiceDeductionRate) * 100)}% 금액으로 공제액을 조회했습니다.`
-      : "계산서 미발행 현장이므로 실제 단가 그대로 공제액을 조회했습니다.";
-  return { deductionBaseAmount, invoiceDeductionRate, reason };
+      ? `전자계산서 발행 기준: 단가 ${unitPrice.toLocaleString("ko-KR")}원에서 알선수수료 ${brokerageFee.toLocaleString("ko-KR")}원을 제외한 근로자 기준금액 ${workerBaseAmount.toLocaleString("ko-KR")}원에 발행 공제표를 적용했습니다.`
+      : `전자계산서 미발행 기준: 단가 ${unitPrice.toLocaleString("ko-KR")}원에서 알선수수료 ${brokerageFee.toLocaleString("ko-KR")}원을 제외한 근로자 기준금액 ${workerBaseAmount.toLocaleString("ko-KR")}원에 미발행 공제표를 적용했습니다.`;
+  return { deductionBaseAmount: workerBaseAmount, invoiceDeductionRate, brokerageFee, reason };
 }
-
 export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAssignment {
   const {
     worker,
@@ -95,8 +93,8 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
   } = input;
   const ageGroup = getAgeGroupByWorkDate(worker.birthDate, workDate);
   const isOver60 = ageGroup === "OVER_60";
-  const laborCost = Math.round(unitPrice * workCount);
   const { deductionBaseAmount, invoiceDeductionRate, reason: invoiceReason } = getDeductionBaseAmount(site, unitPrice);
+  const laborCost = Math.round(deductionBaseAmount * workCount);
   const monthAssignments = existingAssignments.filter(
     (assignment) => assignment.workerId === workerId && assignment.status !== "취소" && isSameMonth(assignment.workDate, workDate.slice(0, 7))
   );
@@ -121,14 +119,15 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
     site.healthInsuranceOutputBasis === "FIRST_MONTH_NOT_APPLY" ||
     site.pensionOutputBasis === "FIRST_MONTH_NOT_APPLY";
 
-  const rule = findCalculationRule(calculationRules, deductionBaseAmount, deductionType, ageGroup);
-  const baseEmployment = rule?.employmentInsurance ?? ceilWon(deductionBaseAmount * 0.009);
-  let employmentInsurance = deductionType === "일반" ? 0 : ceilWon(baseEmployment * workCount);
+  const rule = findCalculationRule(calculationRules, deductionBaseAmount, deductionType, ageGroup, site.invoiceIssueType);
+  const employmentRate = site.invoiceIssueType === "ISSUED" ? 0.009 : 0.01;
+  const baseEmployment = rule?.employmentInsurance ?? floorWon(deductionBaseAmount * employmentRate);
+  let employmentInsurance = deductionType === "일반" ? 0 : floorWon(baseEmployment * workCount);
 
   const healthWorkDays = site.healthInsuranceBasis === "SITE_BASED" ? siteBasedWorkDays : clientBasedWorkDays;
   const healthManual = site.healthInsuranceBasis === "MANUAL" || site.healthInsuranceOutputBasis === "MANUAL";
   let healthInsuranceApplied = !healthManual && healthWorkDays >= 8 && !firstMonthInsuranceSkipped;
-  let healthInsurance = healthInsuranceApplied ? ceilWon((rule?.healthInsurance ?? 0) * workCount) : 0;
+  let healthInsurance = healthInsuranceApplied ? floorWon((rule?.healthInsurance ?? 0) * workCount) : 0;
   let healthInsuranceReason = healthManual
     ? "건강보험 기준이 수동이므로 자동 계산은 참고값입니다."
     : firstMonthInsuranceSkipped
@@ -146,7 +145,7 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
     !firstMonthInsuranceSkipped &&
     clientBasedWorkDays >= 8 &&
     pensionThresholdLaborCost >= site.pensionMonthlyThreshold;
-  let nationalPension = pensionApplied ? ceilWon((rule?.nationalPension ?? 0) * workCount) : 0;
+  let nationalPension = pensionApplied ? floorWon((rule?.nationalPension ?? 0) * workCount) : 0;
   let pensionReason = pensionManual
     ? "국민연금 기준이 수동이므로 자동 계산은 참고값입니다."
     : isOver60
@@ -157,7 +156,7 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
           ? `노무비 총액 ${pensionThresholdLaborCost.toLocaleString("ko-KR")}원이 기준금액 ${site.pensionMonthlyThreshold.toLocaleString("ko-KR")}원 이상으로 국민연금 적용 판단`
           : `노무비 총액 ${pensionThresholdLaborCost.toLocaleString("ko-KR")}원이 기준금액 ${site.pensionMonthlyThreshold.toLocaleString("ko-KR")}원 미만으로 국민연금 미적용`;
 
-  const longTermCare = healthInsuranceApplied ? ceilWon((rule?.longTermCare ?? 0) * workCount) : 0;
+  const longTermCare = healthInsuranceApplied ? floorWon((rule?.longTermCare ?? 0) * workCount) : 0;
 
   if (clientBasedWorkDays <= 7) {
     healthInsuranceApplied = false;

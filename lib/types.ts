@@ -187,6 +187,10 @@ export interface CalculationRule {
   deductionType: DeductionType;
   ageGroup: AgeGroup;
   unitPrice: number;
+  brokerageFeeRate: number;
+  brokerageFee: number;
+  workerBaseAmount: number;
+  invoiceIssueType: InvoiceIssueType;
   laborCost: number;
   employmentInsurance: number;
   healthInsurance: number;

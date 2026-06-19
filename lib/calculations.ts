@@ -2,6 +2,7 @@ import {
   AgeGroup,
   CalculationRule,
   DeductionType,
+  InvoiceIssueType,
   RequestStatus,
   WorkAssignment,
   WorkEntry,
@@ -34,19 +35,40 @@ export function ceilWon(value: number) {
   return Math.ceil((value || 0) / 10) * 10;
 }
 
+export function floorWon(value: number) {
+  return Math.floor((value || 0) / 10) * 10;
+}
+
+export function getWorkerBaseAmount(unitPrice: number, brokerageFeeRate = 0.1) {
+  const brokerageFee = Math.round((unitPrice || 0) * brokerageFeeRate);
+  return {
+    brokerageFeeRate,
+    brokerageFee,
+    workerBaseAmount: Math.max(Math.round((unitPrice || 0) - brokerageFee), 0)
+  };
+}
+
+function getEmploymentRate(deductionType: DeductionType, invoiceIssueType: InvoiceIssueType) {
+  if (deductionType === "일반") return 0;
+  return invoiceIssueType === "ISSUED" ? 0.009 : 0.01;
+}
+
 export function createCalculationRule(
   id: string,
   unitPrice: number,
   deductionType: DeductionType,
   ageGroup: AgeGroup = "ALL",
-  memo = ""
+  memo = "",
+  invoiceIssueType: InvoiceIssueType = "NOT_ISSUED",
+  brokerageFeeRate = 0.1
 ): CalculationRule {
-  const laborCost = unitPrice;
+  const { brokerageFee, workerBaseAmount } = getWorkerBaseAmount(unitPrice, brokerageFeeRate);
   const rates = fallbackRates[deductionType];
-  const employmentInsurance = ceilWon(laborCost * rates.employment);
-  const healthInsurance = ceilWon(laborCost * rates.health);
-  const nationalPension = ageGroup === "OVER_60" ? 0 : ceilWon(laborCost * rates.pension);
-  const longTermCare = ceilWon(laborCost * rates.care);
+  const laborCost = workerBaseAmount;
+  const employmentInsurance = floorWon(workerBaseAmount * getEmploymentRate(deductionType, invoiceIssueType));
+  const healthInsurance = floorWon(workerBaseAmount * rates.health);
+  const nationalPension = ageGroup === "OVER_60" ? 0 : floorWon(workerBaseAmount * rates.pension);
+  const longTermCare = floorWon(workerBaseAmount * rates.care);
   const deductionAmount = employmentInsurance + healthInsurance + nationalPension + longTermCare;
 
   return {
@@ -54,29 +76,35 @@ export function createCalculationRule(
     deductionType,
     ageGroup,
     unitPrice,
+    brokerageFeeRate,
+    brokerageFee,
+    workerBaseAmount,
+    invoiceIssueType,
     laborCost,
     employmentInsurance,
     healthInsurance,
     nationalPension,
     longTermCare,
     deductionAmount,
-    paymentAmount: laborCost - deductionAmount,
+    paymentAmount: workerBaseAmount - deductionAmount,
     memo
   };
 }
 
 export function findCalculationRule(
   rules: CalculationRule[],
-  deductionBaseAmount: number,
+  workerBaseAmount: number,
   deductionType: DeductionType,
-  ageGroup: AgeGroup
+  ageGroup: AgeGroup,
+  invoiceIssueType: InvoiceIssueType
 ) {
   return (
-    rules.find((rule) => rule.unitPrice === deductionBaseAmount && rule.deductionType === deductionType && rule.ageGroup === ageGroup) ??
-    rules.find((rule) => rule.unitPrice === deductionBaseAmount && rule.deductionType === deductionType && rule.ageGroup === "ALL")
+    rules.find((rule) => (rule.workerBaseAmount ?? rule.laborCost ?? rule.unitPrice) === workerBaseAmount && rule.deductionType === deductionType && rule.ageGroup === ageGroup && (rule.invoiceIssueType ?? "NOT_ISSUED") === invoiceIssueType) ??
+    rules.find((rule) => (rule.workerBaseAmount ?? rule.laborCost ?? rule.unitPrice) === workerBaseAmount && rule.deductionType === deductionType && rule.ageGroup === "ALL" && (rule.invoiceIssueType ?? "NOT_ISSUED") === invoiceIssueType) ??
+    rules.find((rule) => (rule.workerBaseAmount ?? rule.laborCost ?? rule.unitPrice) === workerBaseAmount && rule.deductionType === deductionType && rule.ageGroup === ageGroup) ??
+    rules.find((rule) => (rule.workerBaseAmount ?? rule.laborCost ?? rule.unitPrice) === workerBaseAmount && rule.deductionType === deductionType && rule.ageGroup === "ALL")
   );
 }
-
 export function monthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -138,27 +166,28 @@ export function calculateByRule(
   rules: CalculationRule[],
   manualDeductionAmount?: number
 ) {
-  const laborCost = Math.round(unitPrice * workCount);
+  const { workerBaseAmount } = getWorkerBaseAmount(unitPrice);
+  const laborCost = Math.round(workerBaseAmount * workCount);
   const rule =
-    rules.find((item) => item.unitPrice === unitPrice && item.deductionType === deductionType && item.ageGroup === "ALL") ??
-    rules.find((item) => item.unitPrice === unitPrice && item.deductionType === deductionType);
+    rules.find((item) => (item.workerBaseAmount ?? item.laborCost ?? item.unitPrice) === workerBaseAmount && item.deductionType === deductionType && item.ageGroup === "ALL") ??
+    rules.find((item) => (item.workerBaseAmount ?? item.laborCost ?? item.unitPrice) === workerBaseAmount && item.deductionType === deductionType);
   const deductionAmount =
     manualDeductionAmount !== undefined
       ? ceilWon(manualDeductionAmount)
       : rule
-        ? ceilWon(rule.employmentInsurance * workCount) +
-          ceilWon(rule.healthInsurance * workCount) +
-          ceilWon(rule.nationalPension * workCount) +
-          ceilWon(rule.longTermCare * workCount)
+        ? floorWon(rule.employmentInsurance * workCount) +
+          floorWon(rule.healthInsurance * workCount) +
+          floorWon(rule.nationalPension * workCount) +
+          floorWon(rule.longTermCare * workCount)
         : 0;
   return {
     laborCost,
     deductionAmount,
     paymentAmount: laborCost - deductionAmount,
-    employmentInsurance: rule ? ceilWon(rule.employmentInsurance * workCount) : 0,
-    healthInsurance: rule ? ceilWon(rule.healthInsurance * workCount) : 0,
-    nationalPension: rule ? ceilWon(rule.nationalPension * workCount) : 0,
-    longTermCare: rule ? ceilWon(rule.longTermCare * workCount) : 0,
+    employmentInsurance: rule ? floorWon(rule.employmentInsurance * workCount) : 0,
+    healthInsurance: rule ? floorWon(rule.healthInsurance * workCount) : 0,
+    nationalPension: rule ? floorWon(rule.nationalPension * workCount) : 0,
+    longTermCare: rule ? floorWon(rule.longTermCare * workCount) : 0,
     matchedRule: Boolean(rule)
   };
 }
@@ -181,7 +210,7 @@ export function withCalculatedAssignment(
   rules: CalculationRule[]
 ): WorkAssignment {
   const calculated = calculateByRule(input.unitPrice, input.workCount, input.deductionType, rules);
-  const deductionBaseAmount = input.deductionBaseAmount ?? input.unitPrice;
+  const deductionBaseAmount = input.deductionBaseAmount ?? getWorkerBaseAmount(input.unitPrice, input.invoiceDeductionRate ?? 0.1).workerBaseAmount;
   return {
     ...input,
     deductionBaseAmount,

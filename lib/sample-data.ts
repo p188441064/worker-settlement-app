@@ -67,13 +67,14 @@ export const sampleSites: Site[] = [
 const rulePrices = [75000, 90000, 100000, 108000, 120000, 126000, 130000, 135000, 140000, 150000];
 const ruleTypes: DeductionType[] = ["일반", "고용보험", "4대보험_60세미만", "4대보험_60세이상", "8일차_고용연금", "8일차_건강보험", "기타"];
 export const sampleCalculationRules: CalculationRule[] = rulePrices.flatMap((price) =>
-  ruleTypes.flatMap((type) => [
-    createCalculationRule(`r-${price}-${type}-all`, price, type, "ALL"),
-    createCalculationRule(`r-${price}-${type}-under`, price, type, "UNDER_60"),
-    createCalculationRule(`r-${price}-${type}-over`, price, type, "OVER_60")
-  ])
+  ruleTypes.flatMap((type) =>
+    (["NOT_ISSUED", "ISSUED"] as const).flatMap((invoiceIssueType) => [
+      createCalculationRule(`r-${price}-${type}-${invoiceIssueType}-all`, price, type, "ALL", "", invoiceIssueType),
+      createCalculationRule(`r-${price}-${type}-${invoiceIssueType}-under`, price, type, "UNDER_60", "", invoiceIssueType),
+      createCalculationRule(`r-${price}-${type}-${invoiceIssueType}-over`, price, type, "OVER_60", "", invoiceIssueType)
+    ])
+  )
 );
-
 const requestRows: Array<[string, string, string, string, string, number, number, DeductionType, string]> = [
   ["2026-05-28", "2026-05-29", "c-003", "s-005", "전월 연속근로 테스트", 2, 140000, "고용보험", "후문"],
   ["2026-06-01", "2026-06-01", "c-001", "s-001", "철근 운반", 5, 150000, "고용보험", "북문"],

@@ -2,7 +2,7 @@
 
 import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
-import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
+import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
 import { loadAppData, resetAppData, saveAppData, createId } from "@/lib/storage";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, ViewKey, WorkAssignment, WorkRequest, Worker } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
@@ -389,7 +389,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
           <div className="flex flex-wrap gap-2">
             <Button onClick={save}>{editing ? "수정 저장" : "등록"}</Button>
             <Button variant="secondary" onClick={() => setForm(emptyWorker)}>초기화</Button>
-            <Button variant="secondary" onClick={() => setShowApplication((value) => !value)}>신청명세서 미리보기</Button>
+            <Button variant="secondary" onClick={() => setShowApplication((value) => !value)}>신상명세서 미리보기</Button>
             <Button variant="secondary" onClick={() => window.print()}>출력/PDF/인쇄</Button>
           </div>
         </div>
@@ -397,7 +397,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
 
       <div className="space-y-5">
       {showApplication && (
-        <Panel title="근로자 신청명세서 미리보기">
+        <Panel title="근로자 신상명세서 미리보기">
           <WorkerApplicationPreview worker={{ ...form, documentStatus: getWorkerDocumentStatus(form), signatureDataUrl: form.signatureDataUrl || createSignatureDataUrl(form.name, form.signatureStyle) }} />
         </Panel>
       )}
@@ -594,7 +594,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
               <option value="NOT_ISSUED">계산서 미발행</option>
             </SelectInput>
           </Field>
-          <Field label="계산서 차감률"><TextInput type="number" step="0.01" value={siteForm.invoiceDeductionRate} onChange={(e) => setFormField("invoiceDeductionRate", Number(e.target.value))} /></Field>
+          <Field label="알선수수료율"><TextInput type="number" step="0.01" value={siteForm.invoiceDeductionRate} onChange={(e) => setFormField("invoiceDeductionRate", Number(e.target.value))} /></Field>
           <Field label="건강보험 판단 기준">
             <SelectInput value={siteForm.healthInsuranceBasis} onChange={(e) => setFormField("healthInsuranceBasis", e.target.value as Site["healthInsuranceBasis"])}>
               <option value="CLIENT_BASED">거래처 기준</option>
@@ -871,7 +871,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
               </div>
               <div className="grid grid-cols-4 gap-2 rounded-md bg-mint-50 p-3 text-sm font-bold">
                 <span>실제 단가 {formatWon(assignmentForm.unitPrice)}</span>
-                <span>공제기준금액 {"deductionBaseAmount" in preview ? formatWon(preview.deductionBaseAmount) : "-"}</span>
+                <span>근로자 기준금액 {"deductionBaseAmount" in preview ? formatWon(preview.deductionBaseAmount) : "-"}</span>
                 <span>총공제 {formatWon(preview.deductionAmount)}</span>
                 <span>차감지급 {formatWon(preview.paymentAmount)}</span>
                 <span>고용 {formatWon("employmentInsurance" in preview ? preview.employmentInsurance : 0)}</span>
@@ -914,7 +914,7 @@ const closingDocLabels: Record<ClosingDocKey, string> = {
   payroll: "일용노무비지급명세서",
   delegation: "위임장",
   receipt: "근로자영수증",
-  application: "근로자 신청명세서"
+  application: "근로자 신상명세서"
 };
 
 function SettlementView({ data, selectedMonth, setSelectedMonth }: { data: AppData; selectedMonth: string; setSelectedMonth: (month: string) => void }) {
@@ -960,7 +960,7 @@ function SettlementView({ data, selectedMonth, setSelectedMonth }: { data: AppDa
     appendClosingSheet(XLSX, book, "일용노무비지급명세서", buildDailyPayrollRows(entries, data, selectedMonth));
     appendClosingSheet(XLSX, book, "위임장", buildDelegationRows(entries, data, selectedSite, selectedMonth));
     appendClosingSheet(XLSX, book, "근로자영수증", buildReceiptRows(entries, data, selectedSite, selectedMonth));
-    appendClosingSheet(XLSX, book, "근로자신청명세서", buildWorkerApplicationRows(entries, data));
+    appendClosingSheet(XLSX, book, "근로자신상명세서", buildWorkerProfileRows(entries, data));
     XLSX.writeFile(book, `${selectedClient.name}_${selectedSite.siteName}_${selectedMonth}_마감자료.xlsx`);
   };
 
@@ -1065,7 +1065,7 @@ function ClosingDocumentsPreview({
         <ReceiptDocuments data={data} entries={entries} site={selectedSite} selectedMonth={selectedMonth} />
       </div>
       <div className={`closing-doc ${activeDoc === "application" ? "block" : "hidden"}`}>
-        <WorkerApplicationDocuments data={data} entries={entries} />
+        <WorkerProfileDocuments data={data} entries={entries} />
       </div>
     </div>
   );
@@ -1086,40 +1086,105 @@ function PrintPage({ title, children }: { title: string; children: ReactNode }) 
 function getWorkerGroups(entries: WorkAssignment[]) {
   const groups = new Map<string, WorkAssignment[]>();
   entries.forEach((entry) => groups.set(entry.workerId, [...(groups.get(entry.workerId) ?? []), entry]));
-  return Array.from(groups.values());
+  return Array.from(groups.values()).sort((a, b) => a[0].workerId.localeCompare(b[0].workerId));
+}
+
+function getClosingPeriodLabel(selectedMonth: string) {
+  const [year, month] = selectedMonth.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return `${selectedMonth}-01 ~ ${selectedMonth}-${String(lastDay).padStart(2, "0")}`;
+}
+
+function getWorkerTotal(items: WorkAssignment[], data: AppData) {
+  const displayItems = items.map((item) => getDisplayAssignment(item, data));
+  return {
+    workDays: new Set(items.map((item) => item.workDate)).size,
+    workCount: items.reduce((sum, item) => sum + item.workCount, 0),
+    laborCost: displayItems.reduce((sum, item) => sum + item.laborCost, 0),
+    employmentInsurance: displayItems.reduce((sum, item) => sum + item.employmentInsurance, 0),
+    healthInsurance: displayItems.reduce((sum, item) => sum + item.healthInsurance, 0),
+    nationalPension: displayItems.reduce((sum, item) => sum + item.nationalPension, 0),
+    longTermCare: displayItems.reduce((sum, item) => sum + item.longTermCare, 0),
+    deductionAmount: displayItems.reduce((sum, item) => sum + item.deductionAmount, 0),
+    paymentAmount: displayItems.reduce((sum, item) => sum + item.paymentAmount, 0)
+  };
+}
+
+function getStatementRows(entries: WorkAssignment[], data: AppData, site: Site) {
+  const map = new Map<string, { date: string; siteName: string; workerCount: number; workCount: number; unitPrice: number; grossLabor: number; laborCost: number; serviceFee: number; etcAmount: number; totalAmount: number }>();
+  entries.forEach((entry) => {
+    const display = getDisplayAssignment(entry, data);
+    const siteName = data.sites.find((item) => item.id === entry.siteId)?.siteName || data.sites.find((item) => item.id === entry.siteId)?.name || site.siteName;
+    const key = `${entry.workDate}-${entry.siteId}-${entry.unitPrice}`;
+    const current = map.get(key) ?? { date: entry.workDate, siteName, workerCount: 0, workCount: 0, unitPrice: entry.unitPrice, grossLabor: 0, laborCost: 0, serviceFee: 0, etcAmount: 0, totalAmount: 0 };
+    const grossLabor = display.laborCost;
+    const laborCost = site.invoiceIssueType === "ISSUED" ? Math.round(grossLabor * (1 - (site.invoiceDeductionRate ?? 0))) : grossLabor;
+    const serviceFee = site.invoiceIssueType === "ISSUED" ? grossLabor - laborCost : 0;
+    current.workerCount += 1;
+    current.workCount += display.workCount;
+    current.grossLabor += grossLabor;
+    current.laborCost += laborCost;
+    current.serviceFee += serviceFee;
+    current.totalAmount += grossLabor;
+    map.set(key, current);
+  });
+  return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date) || a.siteName.localeCompare(b.siteName));
+}
+
+function getDocumentStatusLabel(worker?: Worker) {
+  return worker ? getWorkerDocumentStatus(worker) : "미등록";
+}
+
+function PrintPage({ title, subtitle, orientation = "portrait", children }: { title: string; subtitle?: string; orientation?: "portrait" | "landscape"; children: ReactNode }) {
+  return (
+    <section className={`print-page print-paper ${orientation === "landscape" ? "print-landscape" : ""}`}>
+      <div className="mb-5 border-b-2 border-slate-900 pb-3 text-center">
+        <h2 className="text-2xl font-black tracking-normal">{title}</h2>
+        {subtitle && <p className="mt-1 text-sm font-semibold text-slate-600">{subtitle}</p>}
+      </div>
+      {children}
+    </section>
+  );
 }
 
 function StatementDocument({ data, entries, client, site, selectedMonth }: { data: AppData; entries: WorkAssignment[]; client: Client; site: Site; selectedMonth: string }) {
-  const rows = groupStatement(entries, data);
-  const displayEntries = entries.map((entry) => getDisplayAssignment(entry, data));
-  const totalLabor = displayEntries.reduce((sum, entry) => sum + entry.laborCost, 0);
-  const totalDeduction = displayEntries.reduce((sum, entry) => sum + entry.deductionAmount, 0);
-  const totalPayment = displayEntries.reduce((sum, entry) => sum + entry.paymentAmount, 0);
+  const rows = getStatementRows(entries, data, site);
+  const totals = rows.reduce((sum, row) => ({
+    workerCount: sum.workerCount + row.workerCount,
+    workCount: sum.workCount + row.workCount,
+    grossLabor: sum.grossLabor + row.grossLabor,
+    laborCost: sum.laborCost + row.laborCost,
+    serviceFee: sum.serviceFee + row.serviceFee,
+    etcAmount: sum.etcAmount + row.etcAmount,
+    totalAmount: sum.totalAmount + row.totalAmount
+  }), { workerCount: 0, workCount: 0, grossLabor: 0, laborCost: 0, serviceFee: 0, etcAmount: 0, totalAmount: 0 });
   return (
-    <PrintPage title={site.invoiceIssueType === "NOT_ISSUED" ? "거래명세서(계산서 미발행)" : "거래명세서"}>
+    <PrintPage title="거래명세서" subtitle={`${client.name} / ${site.siteName} / ${getClosingPeriodLabel(selectedMonth)}`}>
       <table className="mb-4 w-full border-collapse text-sm"><tbody>
         <tr><th className={printTh}>공급자</th><td className={printTd}>{data.companyInfo.companyName}</td><th className={printTh}>거래처</th><td className={printTd}>{client.name}</td></tr>
-        <tr><th className={printTh}>현장명</th><td className={printTd}>{site.siteName}</td><th className={printTh}>정산월</th><td className={printTd}>{selectedMonth}</td></tr>
+        <tr><th className={printTh}>현장명</th><td className={printTd}>{site.siteName}</td><th className={printTh}>계산서</th><td className={printTd}>{site.invoiceIssueType === "ISSUED" ? `발행 / 수수료율 ${Math.round((site.invoiceDeductionRate ?? 0) * 100)}%` : "미발행"}</td></tr>
         <tr><th className={printTh}>마감일</th><td className={printTd}>{site.closingDay}일</td><th className={printTh}>결제일</th><td className={printTd}>{site.paymentDay}일</td></tr>
       </tbody></table>
-      <table className="w-full border-collapse text-sm"><thead><tr>{["날짜", "현장명", "인원", "총공수", "단가", "노무비", "공제액", "지급액", "비고"].map((header) => <th key={header} className={printTh}>{header}</th>)}</tr></thead><tbody>
-        {rows.map((row, index) => <tr key={index}><td className={printTd}>{row.날짜}</td><td className={printTd}>{row.현장명}</td><td className={printTd}>{row.인원}</td><td className={printTd}>{row.총공수}</td><td className={printTd}>{formatWon(Number(row.단가))}</td><td className={printTd}>{formatWon(Number(row["노무비 합계"]))}</td><td className={printTd}>{formatWon(Number(row["공제액 합계"]))}</td><td className={printTd}>{formatWon(Number(row["지급액 합계"]))}</td><td className={printTd}></td></tr>)}
-        <tr><th className={printTh} colSpan={5}>합계</th><td className={printTd}>{formatWon(totalLabor)}</td><td className={printTd}>{formatWon(totalDeduction)}</td><td className={printTd}>{formatWon(totalPayment)}</td><td className={printTd}></td></tr>
+      <table className="w-full border-collapse text-sm"><thead><tr>{["날짜", "현장명", "인원", "단가", "노임총액", "노무비", "수수료", "기타", "합계"].map((header) => <th key={header} className={printTh}>{header}</th>)}</tr></thead><tbody>
+        {rows.map((row, index) => <tr key={index}><td className={printTd}>{formatDateDot(row.date)}</td><td className={printTd}>{row.siteName}</td><td className={printTd}>{row.workerCount}</td><td className={printTd}>{formatWon(row.unitPrice)}</td><td className={printTd}>{formatWon(row.grossLabor)}</td><td className={printTd}>{formatWon(row.laborCost)}</td><td className={printTd}>{formatWon(row.serviceFee)}</td><td className={printTd}>{formatWon(row.etcAmount)}</td><td className={printTd}>{formatWon(row.totalAmount)}</td></tr>)}
+        <tr><th className={printTh} colSpan={2}>합계</th><td className={printTd}>{totals.workerCount}</td><td className={printTd}></td><td className={printTd}>{formatWon(totals.grossLabor)}</td><td className={printTd}>{formatWon(totals.laborCost)}</td><td className={printTd}>{formatWon(totals.serviceFee)}</td><td className={printTd}>{formatWon(totals.etcAmount)}</td><td className={printTd}>{formatWon(totals.totalAmount)}</td></tr>
       </tbody></table>
+      <div className="mt-6 grid grid-cols-2 gap-8 text-sm"><p>작성일: {formatDateDot(today)}</p><p className="text-right">확인: ____________________</p></div>
     </PrintPage>
   );
 }
 
 function DailyPayrollDocument({ data, entries, site, selectedMonth }: { data: AppData; entries: WorkAssignment[]; site: Site; selectedMonth: string }) {
   const workerGroups = getWorkerGroups(entries);
+  const days = Array.from({ length: 31 }, (_, index) => String(index + 1).padStart(2, "0"));
   return (
-    <PrintPage title="일용노무비지급명세서">
-      <div className="mb-4 grid grid-cols-3 gap-2 text-sm"><p><b>현장명</b> {site.siteName}</p><p><b>정산월</b> {selectedMonth}</p><p><b>작성일</b> {formatDateDot(today)}</p></div>
-      <table className="w-full border-collapse text-xs"><thead><tr>{["성명", "주민등록번호", "주소", "근무일수", "총공수", "노무비", "고용", "건강", "국민연금", "장기요양", "지급액", "서명"].map((header) => <th key={header} className={printTh}>{header}</th>)}</tr></thead><tbody>
+    <PrintPage title="일용노무비지급명세서" subtitle={`${site.siteName} / ${getClosingPeriodLabel(selectedMonth)}`} orientation="landscape">
+      <table className="w-full border-collapse text-[10px] leading-tight"><thead><tr>{["성명", "연락처", "주민등록번호", "주소", ...days.map((day) => `${Number(day)}일`), "일수", "공수", "노임총액", "고용", "건강", "국민연금", "장기요양", "차감지급액", "서명"].map((header) => <th key={header} className={printTh}>{header}</th>)}</tr></thead><tbody>
         {workerGroups.map((items) => {
           const worker = data.workers.find((item) => item.id === items[0].workerId);
-          const displayItems = items.map((item) => getDisplayAssignment(item, data));
-          return <tr key={items[0].workerId}><td className={printTd}>{worker?.name}</td><td className={printTd}>{worker?.residentNumber}</td><td className={printTd}>{worker?.address}</td><td className={printTd}>{new Set(items.map((item) => item.workDate)).size}</td><td className={printTd}>{items.reduce((sum, item) => sum + item.workCount, 0)}</td><td className={printTd}>{formatWon(displayItems.reduce((sum, item) => sum + item.laborCost, 0))}</td><td className={printTd}>{formatWon(displayItems.reduce((sum, item) => sum + item.employmentInsurance, 0))}</td><td className={printTd}>{formatWon(displayItems.reduce((sum, item) => sum + item.healthInsurance, 0))}</td><td className={printTd}>{formatWon(displayItems.reduce((sum, item) => sum + item.nationalPension, 0))}</td><td className={printTd}>{formatWon(displayItems.reduce((sum, item) => sum + item.longTermCare, 0))}</td><td className={printTd}>{formatWon(displayItems.reduce((sum, item) => sum + item.paymentAmount, 0))}</td><td className={printTd}>{worker?.signatureDataUrl ? <img src={worker.signatureDataUrl} alt="서명" className="h-10 w-20 object-contain" /> : ""}</td></tr>;
+          const total = getWorkerTotal(items, data);
+          const dayValues = days.map((day) => items.filter((item) => item.workDate.endsWith(`-${day}`)).reduce((sum, item) => sum + item.workCount, 0));
+          return <tr key={items[0].workerId}><td className={printTd}>{worker?.name}</td><td className={printTd}>{worker?.mobile || worker?.phone}</td><td className={printTd}>{worker?.residentNumber}</td><td className={`${printTd} max-w-40 whitespace-normal`}>{worker?.address}</td>{dayValues.map((value, index) => <td key={index} className={`${printTd} text-center`}>{value || ""}</td>)}<td className={printTd}>{total.workDays}</td><td className={printTd}>{total.workCount}</td><td className={printTd}>{formatWon(total.laborCost)}</td><td className={printTd}>{formatWon(total.employmentInsurance)}</td><td className={printTd}>{formatWon(total.healthInsurance)}</td><td className={printTd}>{formatWon(total.nationalPension)}</td><td className={printTd}>{formatWon(total.longTermCare)}</td><td className={printTd}>{formatWon(total.paymentAmount)}</td><td className={printTd}>{worker?.signatureDataUrl ? <img src={worker.signatureDataUrl} alt="서명" className="h-9 w-16 object-contain" /> : ""}</td></tr>;
         })}
       </tbody></table>
     </PrintPage>
@@ -1129,19 +1194,20 @@ function DailyPayrollDocument({ data, entries, site, selectedMonth }: { data: Ap
 function DelegationDocument({ data, entries, site, selectedMonth }: { data: AppData; entries: WorkAssignment[]; site: Site; selectedMonth: string }) {
   const workerGroups = getWorkerGroups(entries);
   return (
-    <PrintPage title="위임장">
+    <PrintPage title="위임장" subtitle={`${site.siteName} / ${getClosingPeriodLabel(selectedMonth)}`}>
       <div className="space-y-3 text-sm leading-7">
-        <p>아래 근로자는 {site.siteName} 현장의 {selectedMonth} 노무비 수령 및 관련 정산 업무를 {data.companyInfo.companyName}에 위임합니다.</p>
+        <p>아래 근로자는 해당 현장의 일용노무비 수령 및 정산자료 제출 업무를 {data.companyInfo.companyName}에 위임합니다.</p>
         <p><b>회사명</b> {data.companyInfo.companyName} / <b>대표자</b> {data.companyInfo.companyRepresentative} / <b>사업자번호</b> {data.companyInfo.businessNumber}</p>
         <p><b>주소</b> {data.companyInfo.companyAddress}</p>
       </div>
       <table className="mt-5 w-full border-collapse text-sm"><thead><tr>{["성명", "주민등록번호", "주소", "지급액", "서명/도장"].map((header) => <th key={header} className={printTh}>{header}</th>)}</tr></thead><tbody>
         {workerGroups.map((items) => {
           const worker = data.workers.find((item) => item.id === items[0].workerId);
-          const total = items.map((item) => getDisplayAssignment(item, data)).reduce((sum, item) => sum + item.paymentAmount, 0);
-          return <tr key={items[0].workerId}><td className={printTd}>{worker?.name}</td><td className={printTd}>{worker?.residentNumber}</td><td className={printTd}>{worker?.address}</td><td className={printTd}>{formatWon(total)}</td><td className={printTd}>{worker?.signatureDataUrl ? <img src={worker.signatureDataUrl} alt="서명" className="h-12 w-24 object-contain" /> : ""}</td></tr>;
+          const total = getWorkerTotal(items, data);
+          return <tr key={items[0].workerId}><td className={printTd}>{worker?.name}</td><td className={printTd}>{worker?.residentNumber}</td><td className={printTd}>{worker?.address}</td><td className={printTd}>{formatWon(total.paymentAmount)}</td><td className={printTd}>{worker?.signatureDataUrl ? <img src={worker.signatureDataUrl} alt="서명" className="h-12 w-24 object-contain" /> : ""}</td></tr>;
         })}
       </tbody></table>
+      <p className="mt-8 text-right text-sm">작성일: {formatDateDot(today)}</p>
     </PrintPage>
   );
 }
@@ -1149,15 +1215,15 @@ function DelegationDocument({ data, entries, site, selectedMonth }: { data: AppD
 function ReceiptDocuments({ data, entries, site, selectedMonth }: { data: AppData; entries: WorkAssignment[]; site: Site; selectedMonth: string }) {
   return <>{getWorkerGroups(entries).map((items) => {
     const worker = data.workers.find((item) => item.id === items[0].workerId);
-    const displayItems = items.map((item) => getDisplayAssignment(item, data));
-    const totalPayment = displayItems.reduce((sum, item) => sum + item.paymentAmount, 0);
+    const total = getWorkerTotal(items, data);
     return (
-      <PrintPage key={items[0].workerId} title="근로자 영수증">
+      <PrintPage key={items[0].workerId} title="근로자 영수증" subtitle={`${site.siteName} / ${getClosingPeriodLabel(selectedMonth)}`}>
         <table className="mb-5 w-full border-collapse text-sm"><tbody>
           <tr><th className={printTh}>성명</th><td className={printTd}>{worker?.name}</td><th className={printTh}>주민등록번호</th><td className={printTd}>{worker?.residentNumber}</td></tr>
           <tr><th className={printTh}>주소</th><td className={printTd} colSpan={3}>{worker?.address}</td></tr>
-          <tr><th className={printTh}>현장명</th><td className={printTd}>{site.siteName}</td><th className={printTh}>정산월</th><td className={printTd}>{selectedMonth}</td></tr>
-          <tr><th className={printTh}>근무일수</th><td className={printTd}>{new Set(items.map((item) => item.workDate)).size}일</td><th className={printTh}>수령금액</th><td className={printTd}>{formatWon(totalPayment)}</td></tr>
+          <tr><th className={printTh}>근무일수</th><td className={printTd}>{total.workDays}일</td><th className={printTh}>총 공수</th><td className={printTd}>{total.workCount}</td></tr>
+          <tr><th className={printTh}>노임총액</th><td className={printTd}>{formatWon(total.laborCost)}</td><th className={printTh}>공제액</th><td className={printTd}>{formatWon(total.deductionAmount)}</td></tr>
+          <tr><th className={printTh}>수령금액</th><td className={printTd} colSpan={3}>{formatWon(total.paymentAmount)}</td></tr>
         </tbody></table>
         <p className="mb-8 text-sm leading-7">상기 금액을 해당 기간 동안의 일용노무비로 정히 수령하였음을 확인합니다.</p>
         <div className="flex items-end justify-end gap-6"><span>수령인: {worker?.name}</span>{worker?.signatureDataUrl && <img src={worker.signatureDataUrl} alt="서명" className="h-20 w-28 object-contain" />}</div>
@@ -1167,23 +1233,22 @@ function ReceiptDocuments({ data, entries, site, selectedMonth }: { data: AppDat
   })}</>;
 }
 
-function WorkerApplicationDocuments({ data, entries }: { data: AppData; entries: WorkAssignment[] }) {
+function WorkerProfileDocuments({ data, entries }: { data: AppData; entries: WorkAssignment[] }) {
   const workerIds = Array.from(new Set(entries.map((entry) => entry.workerId)));
   return <>{workerIds.map((workerId) => {
     const worker = data.workers.find((item) => item.id === workerId);
     if (!worker) return null;
     return (
-      <PrintPage key={worker.id} title="근로자 신청명세서">
+      <PrintPage key={worker.id} title="근로자 신상명세서" subtitle={`근로자코드 ${worker.workerCode || "자동생성"}`}>
         <table className="mb-5 w-full border-collapse text-sm"><tbody>
-          <tr><th className={printTh}>근로자코드</th><td className={printTd}>{worker.workerCode}</td><th className={printTh}>성명</th><td className={printTd}>{worker.name}</td></tr>
-          <tr><th className={printTh}>주민등록번호</th><td className={printTd}>{worker.residentNumber}</td><th className={printTh}>생년월일</th><td className={printTd}>{worker.birthDate}</td></tr>
-          <tr><th className={printTh}>연락처</th><td className={printTd}>{worker.mobile || worker.phone}</td><th className={printTh}>등록일</th><td className={printTd}>{worker.registrationDate}</td></tr>
+          <tr><th className={printTh}>성명</th><td className={printTd}>{worker.name}</td><th className={printTh}>주민등록번호</th><td className={printTd}>{worker.residentNumber}</td></tr>
+          <tr><th className={printTh}>생년월일</th><td className={printTd}>{worker.birthDate}</td><th className={printTh}>연락처</th><td className={printTd}>{worker.mobile || worker.phone}</td></tr>
           <tr><th className={printTh}>주소</th><td className={printTd} colSpan={3}>{worker.address}</td></tr>
           <tr><th className={printTh}>직종</th><td className={printTd}>{worker.jobType}</td><th className={printTh}>경력</th><td className={printTd}>{worker.career}</td></tr>
-          <tr><th className={printTh}>자격증</th><td className={printTd}>{worker.certifications}</td><th className={printTh}>서류상태</th><td className={printTd}>{getWorkerDocumentStatus(worker)}</td></tr>
+          <tr><th className={printTh}>자격증</th><td className={printTd}>{worker.certifications}</td><th className={printTh}>서류상태</th><td className={printTd}>{getDocumentStatusLabel(worker)}</td></tr>
         </tbody></table>
         <div className="grid grid-cols-3 gap-3"><DocumentImage title="신분증 앞면" value={worker.idCardFrontImage} /><DocumentImage title="신분증 뒷면" value={worker.idCardBackImage} /><DocumentImage title="이수증" value={worker.safetyCertificateImage} /></div>
-        <div className="mt-6 flex items-end justify-end gap-4"><span>작성자: {worker.name}</span>{worker.signatureDataUrl && <img src={worker.signatureDataUrl} alt="서명/도장" className="h-20 w-28 object-contain" />}</div>
+        <div className="mt-6 flex items-end justify-end gap-4"><span>신청인: {worker.name}</span>{worker.signatureDataUrl && <img src={worker.signatureDataUrl} alt="서명/도장" className="h-20 w-28 object-contain" />}</div>
       </PrintPage>
     );
   })}</>;
@@ -1451,43 +1516,86 @@ function WorkerJournalView({ data }: { data: AppData }) {
 function RulesView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
   const [form, setForm] = useState<CalculationRule>(emptyRule);
 
-  const setMoney = (key: keyof CalculationRule, value: number) => {
-    const next = { ...form, [key]: ceilWon(value) } as CalculationRule;
-    const deductionAmount =
-      ceilWon(next.employmentInsurance) +
-      ceilWon(next.healthInsurance) +
-      ceilWon(next.nationalPension) +
-      ceilWon(next.longTermCare);
-    setForm({ ...next, laborCost: next.unitPrice, deductionAmount, paymentAmount: next.unitPrice - deductionAmount });
+  const recalculateRule = (next: Partial<CalculationRule>) => {
+    const unitPrice = next.unitPrice ?? form.unitPrice;
+    const brokerageFeeRate = next.brokerageFeeRate ?? form.brokerageFeeRate ?? 0.1;
+    const invoiceIssueType = next.invoiceIssueType ?? form.invoiceIssueType ?? "NOT_ISSUED";
+    const base = getWorkerBaseAmount(unitPrice, brokerageFeeRate);
+    const employmentInsurance = ceilWon(next.employmentInsurance ?? form.employmentInsurance ?? 0);
+    const healthInsurance = ceilWon(next.healthInsurance ?? form.healthInsurance ?? 0);
+    const nationalPension = ceilWon(next.nationalPension ?? form.nationalPension ?? 0);
+    const longTermCare = ceilWon(next.longTermCare ?? form.longTermCare ?? 0);
+    const deductionAmount = employmentInsurance + healthInsurance + nationalPension + longTermCare;
+    return {
+      ...form,
+      ...next,
+      unitPrice,
+      brokerageFeeRate,
+      brokerageFee: base.brokerageFee,
+      workerBaseAmount: base.workerBaseAmount,
+      invoiceIssueType,
+      laborCost: base.workerBaseAmount,
+      employmentInsurance,
+      healthInsurance,
+      nationalPension,
+      longTermCare,
+      deductionAmount,
+      paymentAmount: base.workerBaseAmount - deductionAmount
+    } as CalculationRule;
+  };
+
+  const resetByFormula = (next: Partial<CalculationRule>) => {
+    const unitPrice = next.unitPrice ?? form.unitPrice;
+    const deductionType = next.deductionType ?? form.deductionType;
+    const ageGroup = next.ageGroup ?? form.ageGroup;
+    const memo = next.memo ?? form.memo;
+    const invoiceIssueType = next.invoiceIssueType ?? form.invoiceIssueType ?? "NOT_ISSUED";
+    const brokerageFeeRate = next.brokerageFeeRate ?? form.brokerageFeeRate ?? 0.1;
+    setForm(createCalculationRule(form.id, unitPrice, deductionType, ageGroup, memo, invoiceIssueType, brokerageFeeRate));
+  };
+
+  const setMoney = (key: keyof Pick<CalculationRule, "employmentInsurance" | "healthInsurance" | "nationalPension" | "longTermCare">, value: number) => {
+    setForm(recalculateRule({ [key]: value } as Partial<CalculationRule>));
   };
 
   const save = () => {
-    const rule = { ...form, id: form.id || createId("r") };
+    const rule = { ...recalculateRule(form), id: form.id || createId("r") };
     updateData({ ...data, calculationRules: form.id ? data.calculationRules.map((item) => (item.id === rule.id ? rule : item)) : [...data.calculationRules, rule] });
     setForm(emptyRule);
   };
 
   return (
-    <div className="grid grid-cols-[380px_1fr] gap-5">
+    <div className="grid grid-cols-[420px_1fr] gap-5">
       <Panel title={form.id ? "계산기준 수정" : "계산기준 등록"}>
         <div className="grid gap-3">
-          <Field label="공제유형"><DeductionSelect value={form.deductionType} onChange={(value) => setForm(createCalculationRule(form.id, form.unitPrice, value))} /></Field>
+          <Field label="공제유형"><DeductionSelect value={form.deductionType} onChange={(value) => resetByFormula({ deductionType: value })} /></Field>
           <Field label="나이구분">
-            <SelectInput value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value as CalculationRule["ageGroup"] })}>
+            <SelectInput value={form.ageGroup} onChange={(e) => resetByFormula({ ageGroup: e.target.value as CalculationRule["ageGroup"] })}>
               <option value="ALL">전체</option>
               <option value="UNDER_60">60세 미만</option>
               <option value="OVER_60">60세 이상</option>
             </SelectInput>
           </Field>
-          <Field label="단가"><TextInput type="number" value={form.unitPrice} onChange={(e) => setForm(createCalculationRule(form.id, Number(e.target.value), form.deductionType))} /></Field>
+          <Field label="단가"><TextInput type="number" value={form.unitPrice} onChange={(e) => resetByFormula({ unitPrice: Number(e.target.value) })} /></Field>
+          <Field label="알선수수료율"><TextInput type="number" step="0.01" value={form.brokerageFeeRate ?? 0.1} onChange={(e) => resetByFormula({ brokerageFeeRate: Number(e.target.value) })} /></Field>
+          <div className="grid grid-cols-2 gap-2 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900">
+            <span>알선수수료 {formatWon(form.brokerageFee)}</span>
+            <span>근로자 기준금액 {formatWon(form.workerBaseAmount)}</span>
+          </div>
+          <Field label="전자계산서 발행 여부">
+            <SelectInput value={form.invoiceIssueType ?? "NOT_ISSUED"} onChange={(e) => resetByFormula({ invoiceIssueType: e.target.value as CalculationRule["invoiceIssueType"] })}>
+              <option value="NOT_ISSUED">전자계산서(면세) 미발행</option>
+              <option value="ISSUED">전자계산서(면세) 발행</option>
+            </SelectInput>
+          </Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="고용보험"><TextInput type="number" value={form.employmentInsurance} onChange={(e) => setMoney("employmentInsurance", Number(e.target.value))} /></Field>
+            <Field label="고용공제"><TextInput type="number" value={form.employmentInsurance} onChange={(e) => setMoney("employmentInsurance", Number(e.target.value))} /></Field>
             <Field label="건강보험"><TextInput type="number" value={form.healthInsurance} onChange={(e) => setMoney("healthInsurance", Number(e.target.value))} /></Field>
             <Field label="국민연금"><TextInput type="number" value={form.nationalPension} onChange={(e) => setMoney("nationalPension", Number(e.target.value))} /></Field>
             <Field label="장기요양"><TextInput type="number" value={form.longTermCare} onChange={(e) => setMoney("longTermCare", Number(e.target.value))} /></Field>
           </div>
           <Field label="비고"><TextInput value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} /></Field>
-          <div className="rounded-md bg-mint-50 p-3 text-sm font-bold text-navy-900">총공제 {formatWon(form.deductionAmount)} / 지급 {formatWon(form.paymentAmount)}</div>
+          <div className="rounded-md bg-mint-50 p-3 text-sm font-bold text-navy-900">총공제액 {formatWon(form.deductionAmount)} / 최종 지급액 {formatWon(form.paymentAmount)}</div>
           <div className="flex gap-2"><Button onClick={save}>저장</Button><Button variant="secondary" onClick={() => setForm(emptyRule)}>초기화</Button></div>
         </div>
       </Panel>
@@ -1495,15 +1603,18 @@ function RulesView({ data, updateData }: { data: AppData; updateData: (data: App
       <Panel title="단가별 계산기준 목록">
         <DataTable>
           <table className="w-full border-collapse">
-            <thead><tr>{["공제유형", "나이구분", "공제기준금액", "노무비", "고용보험", "건강보험", "국민연금", "장기요양", "총공제액", "지급액", "비고", "관리"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-            <tbody>{[...data.calculationRules].sort((a, b) => a.unitPrice - b.unitPrice || a.deductionType.localeCompare(b.deductionType)).map((rule) => <tr key={rule.id}><td className={td}>{rule.deductionType}</td><td className={td}>{ageGroupLabel(rule.ageGroup)}</td><td className={td}>{formatWon(rule.unitPrice)}</td><td className={td}>{formatWon(rule.laborCost)}</td><td className={td}>{formatNumber(rule.employmentInsurance)}</td><td className={td}>{formatNumber(rule.healthInsurance)}</td><td className={td}>{formatNumber(rule.nationalPension)}</td><td className={td}>{formatNumber(rule.longTermCare)}</td><td className={td}>{formatWon(rule.deductionAmount)}</td><td className={td}>{formatWon(rule.paymentAmount)}</td><td className={td}>{rule.memo}</td><td className={`${td} space-x-2`}><Button variant="secondary" onClick={() => setForm(rule)}>수정</Button><Button variant="danger" onClick={() => confirm("계산기준을 삭제할까요?") && updateData({ ...data, calculationRules: data.calculationRules.filter((item) => item.id !== rule.id) })}>삭제</Button></td></tr>)}</tbody>
+            <thead><tr>{["공제유형", "나이구분", "단가", "수수료율", "알선수수료", "근로자 기준금액", "전자계산서", "고용공제", "건강보험", "국민연금", "장기요양", "총공제액", "최종 지급액", "비고", "관리"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <tbody>{[...data.calculationRules].sort((a, b) => a.unitPrice - b.unitPrice || (a.invoiceIssueType ?? "").localeCompare(b.invoiceIssueType ?? "") || a.deductionType.localeCompare(b.deductionType)).map((rule) => {
+              const base = getWorkerBaseAmount(rule.unitPrice, rule.brokerageFeeRate ?? 0.1);
+              const displayRule = { ...rule, brokerageFee: rule.brokerageFee ?? base.brokerageFee, workerBaseAmount: rule.workerBaseAmount ?? base.workerBaseAmount, brokerageFeeRate: rule.brokerageFeeRate ?? 0.1, invoiceIssueType: rule.invoiceIssueType ?? "NOT_ISSUED" };
+              return <tr key={rule.id}><td className={td}>{displayRule.deductionType}</td><td className={td}>{ageGroupLabel(displayRule.ageGroup)}</td><td className={td}>{formatWon(displayRule.unitPrice)}</td><td className={td}>{Math.round(displayRule.brokerageFeeRate * 100)}%</td><td className={td}>{formatWon(displayRule.brokerageFee)}</td><td className={td}>{formatWon(displayRule.workerBaseAmount)}</td><td className={td}>{displayRule.invoiceIssueType === "ISSUED" ? "발행" : "미발행"}</td><td className={td}>{formatNumber(displayRule.employmentInsurance)}</td><td className={td}>{formatNumber(displayRule.healthInsurance)}</td><td className={td}>{formatNumber(displayRule.nationalPension)}</td><td className={td}>{formatNumber(displayRule.longTermCare)}</td><td className={td}>{formatWon(displayRule.deductionAmount)}</td><td className={td}>{formatWon(displayRule.paymentAmount)}</td><td className={td}>{displayRule.memo}</td><td className={`${td} space-x-2`}><Button variant="secondary" onClick={() => setForm(displayRule)}>수정</Button><Button variant="danger" onClick={() => confirm("계산기준을 삭제할까요?") && updateData({ ...data, calculationRules: data.calculationRules.filter((item) => item.id !== rule.id) })}>삭제</Button></td></tr>;
+            })}</tbody>
           </table>
         </DataTable>
       </Panel>
     </div>
   );
 }
-
 function RequestTable({
   requests,
   data,
@@ -1561,29 +1672,42 @@ function getDisplayAssignment(assignment: WorkAssignment, data: AppData) {
       workCount: assignment.workCount,
       deductionType: assignment.deductionType,
       existingAssignments: data.assignments.filter((item) => item.id !== assignment.id),
-      calculationRules: data.calculationRules
+      calculationRules: data.calculationRules,
+      manual: assignment.isManualDeduction
+        ? {
+            employmentInsurance: assignment.manualEmploymentInsurance ?? assignment.employmentInsurance,
+            healthInsurance: assignment.manualHealthInsurance ?? assignment.healthInsurance,
+            nationalPension: assignment.manualNationalPension ?? assignment.nationalPension,
+            longTermCare: assignment.manualLongTermCare ?? assignment.longTermCare,
+            deductionAmount: assignment.manualDeductionAmount,
+            paymentAmount: assignment.manualPaymentAmount,
+            manualReason: assignment.manualReason
+          }
+        : undefined
     });
   }
-  const employmentInsurance = ceilWon(assignment.employmentInsurance || calculated.employmentInsurance || 0);
-  const healthInsurance = ceilWon(assignment.healthInsurance || calculated.healthInsurance || 0);
-  const nationalPension = ceilWon(assignment.nationalPension || calculated.nationalPension || 0);
-  const longTermCare = ceilWon(assignment.longTermCare || calculated.longTermCare || 0);
-  const deductionAmount = employmentInsurance + healthInsurance + nationalPension + longTermCare;
-  const laborCost = assignment.laborCost || Math.round(assignment.unitPrice * assignment.workCount);
+  const employmentInsurance = calculated.employmentInsurance || 0;
+  const healthInsurance = calculated.healthInsurance || 0;
+  const nationalPension = calculated.nationalPension || 0;
+  const longTermCare = calculated.longTermCare || 0;
+  const deductionAmount = calculated.deductionAmount ?? employmentInsurance + healthInsurance + nationalPension + longTermCare;
+  const laborCost = calculated.laborCost || Math.round((calculated.deductionBaseAmount || assignment.unitPrice) * assignment.workCount);
   return {
     ...assignment,
+    deductionBaseAmount: calculated.deductionBaseAmount || assignment.deductionBaseAmount,
+    invoiceIssueType: calculated.invoiceIssueType || assignment.invoiceIssueType,
+    invoiceDeductionRate: calculated.invoiceDeductionRate ?? assignment.invoiceDeductionRate,
     employmentInsurance,
     healthInsurance,
     nationalPension,
     longTermCare,
     deductionAmount,
-    paymentAmount: laborCost - deductionAmount,
-    appliedRuleLabel: assignment.appliedRuleLabel || calculated.appliedRuleLabel,
-    deductionReason: assignment.deductionReason || calculated.deductionReason,
+    paymentAmount: calculated.paymentAmount ?? laborCost - deductionAmount,
+    appliedRuleLabel: calculated.appliedRuleLabel || assignment.appliedRuleLabel,
+    deductionReason: calculated.deductionReason || assignment.deductionReason,
     laborCost
   };
 }
-
 function AssignmentTable({ assignments, data, actions }: { assignments: WorkAssignment[]; data: AppData; actions?: (assignment: WorkAssignment) => ReactNode }) {
   return (
     <DataTable>
@@ -1675,7 +1799,7 @@ function WorkerFileField({
 function WorkerApplicationPreview({ worker }: { worker: Worker }) {
   return (
     <div className="mx-auto max-w-3xl border border-navy-200 bg-white p-8 text-navy-900 shadow-sm print:shadow-none">
-      <h2 className="mb-6 text-center text-2xl font-black">근로자 신청명세서</h2>
+      <h2 className="mb-6 text-center text-2xl font-black">근로자 신상명세서</h2>
       <table className="mb-5 w-full border-collapse text-sm">
         <tbody>
           {[
@@ -1777,104 +1901,65 @@ function buildReceivableRows(data: AppData, closingMonth: string) {
 }
 
 function buildStatementRows(entries: WorkAssignment[], data: AppData, clientName: string, site: Site, selectedMonth: string) {
-  const grouped = groupStatement(entries, data);
   const rows: Array<Array<string | number>> = [
-    [data.companyInfo.companyName],
-    [site.invoiceIssueType === "NOT_ISSUED" ? "(미발급) 거래 명세표" : "거래 명세표"],
-    ["거래처명", clientName, "현장명", site.siteName],
-    ["정산기간", `${selectedMonth}.01`, "~", `${selectedMonth}.말`, "작성일", formatDateDot(new Date().toISOString().slice(0, 10))],
-    site.invoiceIssueType === "NOT_ISSUED"
-      ? ["날짜", "현장명", "인원", "단가", "수금액", "미수금액", "기타"]
-      : ["날짜", "현장명", "인원", "단가", "노임총액", "노무비", "공제액", "지급액", "수수료", "기타"]
+    ["거래명세서"],
+    ["거래처명", clientName, "현장명", site.siteName, "정산기간", getClosingPeriodLabel(selectedMonth)],
+    ["계산서", site.invoiceIssueType === "ISSUED" ? "발행" : "미발행", "수수료율", site.invoiceIssueType === "ISSUED" ? `${Math.round((site.invoiceDeductionRate ?? 0) * 100)}%` : "-"],
+    ["날짜", "현장명", "인원", "단가", "노임총액", "노무비", "수수료", "기타", "합계"]
   ];
-  grouped.forEach((row) => {
-    if (site.invoiceIssueType === "NOT_ISSUED") {
-      rows.push([String(row.날짜), String(row.현장명), Number(row.인원), Number(row.단가), Number(row["노무비 합계"]), 0, 0]);
-    } else {
-      rows.push([String(row.날짜), String(row.현장명), Number(row.인원), Number(row.단가), Number(row["노무비 합계"]), Number(row["노무비 합계"]), Number(row["공제액 합계"]), Number(row["지급액 합계"]), 0, 0]);
-    }
-  });
-  const total = entries.reduce((sum, entry) => sum + entry.laborCost, 0);
-  rows.push(["합계", "", entries.length, "", total]);
-  if (site.invoiceIssueType === "ISSUED") rows.push(["계산서 금액", total]);
+  const statementRows = getStatementRows(entries, data, site);
+  statementRows.forEach((row) => rows.push([formatDateDot(row.date), row.siteName, row.workerCount, row.unitPrice, row.grossLabor, row.laborCost, row.serviceFee, row.etcAmount, row.totalAmount]));
+  rows.push(["합계", "", statementRows.reduce((sum, row) => sum + row.workerCount, 0), "", statementRows.reduce((sum, row) => sum + row.grossLabor, 0), statementRows.reduce((sum, row) => sum + row.laborCost, 0), statementRows.reduce((sum, row) => sum + row.serviceFee, 0), statementRows.reduce((sum, row) => sum + row.etcAmount, 0), statementRows.reduce((sum, row) => sum + row.totalAmount, 0)]);
   return rows;
 }
 
 function buildDailyPayrollRows(entries: WorkAssignment[], data: AppData, selectedMonth: string) {
-  const days = Array.from({ length: 31 }, (_, index) => `${index + 1}일`);
+  const days = Array.from({ length: 31 }, (_, index) => String(index + 1).padStart(2, "0"));
   const rows: Array<Array<string | number>> = [
     ["일용노무비지급명세서"],
-    ["정산월", selectedMonth],
-    ["직종", "성명", "주민등록번호", "주소", "연락처", ...days, "근무일수", "단가", "소득세/주민세", "고용보험", "건강보험", "국민연금", "장기요양", "차감지급액", "서명"]
+    ["정산기간", getClosingPeriodLabel(selectedMonth)],
+    ["성명", "연락처", "주민등록번호", "주소", ...days.map((day) => `${Number(day)}일`), "근무일수", "총공수", "노임총액", "고용보험", "건강보험", "국민연금", "장기요양", "공제합계", "차감지급액", "서명"]
   ];
-  const groups = new Map<string, WorkAssignment[]>();
-  entries.forEach((entry) => groups.set(`${entry.workerId}-${entry.unitPrice}-${entry.deductionType}`, [...(groups.get(`${entry.workerId}-${entry.unitPrice}-${entry.deductionType}`) ?? []), entry]));
-  groups.forEach((items) => {
+  getWorkerGroups(entries).forEach((items) => {
     const worker = data.workers.find((item) => item.id === items[0].workerId);
-    const displayItems = items.map((item) => getDisplayAssignment(item, data));
-    const dayValues = Array.from({ length: 31 }, (_, index) => {
-      const day = String(index + 1).padStart(2, "0");
-      return items.filter((item) => item.workDate.endsWith(`-${day}`)).reduce((sum, item) => sum + item.workCount, 0) || "";
-    });
-    rows.push(["일용", worker?.name ?? "", worker?.residentNumber ?? "", worker?.address ?? "", worker?.phone ?? "", ...dayValues, new Set(items.map((item) => item.workDate)).size, items[0].unitPrice, 0, displayItems.reduce((sum, item) => sum + item.employmentInsurance, 0), displayItems.reduce((sum, item) => sum + item.healthInsurance, 0), displayItems.reduce((sum, item) => sum + item.nationalPension, 0), displayItems.reduce((sum, item) => sum + item.longTermCare, 0), displayItems.reduce((sum, item) => sum + item.paymentAmount, 0), worker?.signatureDataUrl ? "서명/도장 생성" : ""]);
+    const total = getWorkerTotal(items, data);
+    const dayValues = days.map((day) => items.filter((item) => item.workDate.endsWith(`-${day}`)).reduce((sum, item) => sum + item.workCount, 0) || "");
+    rows.push([worker?.name ?? "", worker?.mobile || worker?.phone || "", worker?.residentNumber ?? "", worker?.address ?? "", ...dayValues, total.workDays, total.workCount, total.laborCost, total.employmentInsurance, total.healthInsurance, total.nationalPension, total.longTermCare, total.deductionAmount, total.paymentAmount, worker?.signatureDataUrl ? "서명/도장 생성" : ""]);
   });
-  const displayEntries = entries.map((item) => getDisplayAssignment(item, data));
-  rows.push(["소계", "", "", "", "", ...Array(31).fill(""), "", "", 0, displayEntries.reduce((sum, item) => sum + item.employmentInsurance, 0), displayEntries.reduce((sum, item) => sum + item.healthInsurance, 0), displayEntries.reduce((sum, item) => sum + item.nationalPension, 0), displayEntries.reduce((sum, item) => sum + item.longTermCare, 0), displayEntries.reduce((sum, item) => sum + item.paymentAmount, 0), ""]);
   return rows;
 }
 
 function buildReceiptRows(entries: WorkAssignment[], data: AppData, site: Site, selectedMonth: string) {
   const rows: Array<Array<string | number>> = [];
-  const groups = new Map<string, WorkAssignment[]>();
-  entries.forEach((entry) => groups.set(entry.workerId, [...(groups.get(entry.workerId) ?? []), entry]));
-  groups.forEach((items) => {
+  getWorkerGroups(entries).forEach((items) => {
     const worker = data.workers.find((item) => item.id === items[0].workerId);
-    const displayItems = items.map((item) => getDisplayAssignment(item, data));
-    rows.push(["영수증"], ["성명", worker?.name ?? "", "주민등록번호", worker?.residentNumber ?? ""], ["주소", worker?.address ?? ""], ["정산기간", selectedMonth, "현장명", site.siteName], ["근무일수", new Set(items.map((item) => item.workDate)).size, "지급금액", displayItems.reduce((sum, item) => sum + item.paymentAmount, 0)], ["상기 금액을 해당 기간 동안 현장 노임으로 정히 영수함"], ["수령인", worker?.name ?? "", "서명/도장", worker?.signatureDataUrl ? "생성됨" : ""], ["신분증사본 영역", worker?.idCardFrontImage ? "앞면 등록" : "앞면 미등록", worker?.idCardBackImage ? "뒷면 등록" : "뒷면 미등록"], [], [], []);
+    const total = getWorkerTotal(items, data);
+    rows.push(["근로자 영수증"], ["성명", worker?.name ?? "", "주민등록번호", worker?.residentNumber ?? ""], ["주소", worker?.address ?? ""], ["현장명", site.siteName, "정산기간", getClosingPeriodLabel(selectedMonth)], ["근무일수", total.workDays, "총공수", total.workCount], ["노임총액", total.laborCost, "공제액", total.deductionAmount], ["수령금액", total.paymentAmount], ["수령인", worker?.name ?? "", "서명/도장", worker?.signatureDataUrl ? "생성됨" : ""], ["신분증 앞면", worker?.idCardFrontImage ? "등록" : "미등록", "신분증 뒷면", worker?.idCardBackImage ? "등록" : "미등록"], [], []);
   });
   return rows;
 }
 
 function buildDelegationRows(entries: WorkAssignment[], data: AppData, site: Site, selectedMonth: string) {
-  const rows: Array<Array<string | number>> = [["위임장"], ["회사 주소", data.companyInfo.companyAddress], ["상호", data.companyInfo.companyName, "대표자", data.companyInfo.companyRepresentative], ["사업자등록번호", data.companyInfo.businessNumber, "계좌정보", data.companyInfo.bankAccountText], ["위임 문구", "아래 근로자는 해당 현장 노임 수령 및 관련 업무를 위임합니다."], ["현장명", site.siteName, "근무기간", selectedMonth], ["이름", "주민등록번호", "주소", "지급액", "서명"]];
-  const groups = new Map<string, WorkAssignment[]>();
-  entries.forEach((entry) => groups.set(entry.workerId, [...(groups.get(entry.workerId) ?? []), entry]));
-  groups.forEach((items) => {
+  const rows: Array<Array<string | number>> = [["위임장"], ["회사명", data.companyInfo.companyName, "대표자", data.companyInfo.companyRepresentative], ["사업자등록번호", data.companyInfo.businessNumber, "주소", data.companyInfo.companyAddress], ["현장명", site.siteName, "정산기간", getClosingPeriodLabel(selectedMonth)], ["성명", "주민등록번호", "주소", "지급액", "서명/도장"]];
+  getWorkerGroups(entries).forEach((items) => {
     const worker = data.workers.find((item) => item.id === items[0].workerId);
-    const displayItems = items.map((item) => getDisplayAssignment(item, data));
-    rows.push([worker?.name ?? "", worker?.residentNumber ?? "", worker?.address ?? "", displayItems.reduce((sum, item) => sum + item.paymentAmount, 0), worker?.signatureDataUrl ? "서명/도장 생성" : ""]);
+    const total = getWorkerTotal(items, data);
+    rows.push([worker?.name ?? "", worker?.residentNumber ?? "", worker?.address ?? "", total.paymentAmount, worker?.signatureDataUrl ? "생성됨" : ""]);
   });
-  rows.push(["합계", "", "", entries.map((item) => getDisplayAssignment(item, data)).reduce((sum, item) => sum + item.paymentAmount, 0), ""]);
+  rows.push(["합계", "", "", getWorkerGroups(entries).reduce((sum, items) => sum + getWorkerTotal(items, data).paymentAmount, 0), ""]);
   return rows;
 }
 
-function buildWorkerApplicationRows(entries: WorkAssignment[], data: AppData) {
+function buildWorkerProfileRows(entries: WorkAssignment[], data: AppData) {
   const rows: Array<Array<string | number>> = [];
   const workerIds = Array.from(new Set(entries.map((entry) => entry.workerId)));
   workerIds.forEach((workerId) => {
     const worker = data.workers.find((item) => item.id === workerId);
     if (!worker) return;
-    rows.push(
-      ["근로자 신청명세서"],
-      ["근로자코드", worker.workerCode, "성명", worker.name],
-      ["주민등록번호", worker.residentNumber, "생년월일", worker.birthDate],
-      ["전화번호", worker.landline, "휴대폰", worker.mobile || worker.phone],
-      ["주소", worker.address],
-      ["등록일", worker.registrationDate, "직종", worker.jobType],
-      ["경력", worker.career, "자격증", worker.certifications],
-      ["서류상태", getWorkerDocumentStatus(worker)],
-      ["신분증 앞면", worker.idCardFrontImage ? "등록" : "미등록", "신분증 뒷면", worker.idCardBackImage ? "등록" : "미등록"],
-      ["이수증", worker.safetyCertificateImage ? "등록" : "미등록", "기타첨부", worker.otherAttachment ? "등록" : "미등록"],
-      ["자동 서명/도장", worker.signatureDataUrl ? "생성됨" : "미생성"],
-      ["확인문구", "상기 내용으로 근로자 등록 및 해당 현장 마감자료 제출을 확인합니다."],
-      [],
-      [],
-      []
-    );
+    rows.push(["근로자 신상명세서"], ["근로자코드", worker.workerCode, "성명", worker.name], ["주민등록번호", worker.residentNumber, "생년월일", worker.birthDate], ["연락처", worker.mobile || worker.phone, "등록일", worker.registrationDate], ["주소", worker.address], ["직종", worker.jobType, "경력", worker.career], ["자격증", worker.certifications, "서류상태", getWorkerDocumentStatus(worker)], ["신분증 앞면", worker.idCardFrontImage ? "등록" : "미등록", "신분증 뒷면", worker.idCardBackImage ? "등록" : "미등록"], ["이수증", worker.safetyCertificateImage ? "등록" : "미등록", "자동 서명/도장", worker.signatureDataUrl ? "생성됨" : "미생성"], [], []);
   });
   return rows;
 }
-
 function groupStatement(entries: WorkAssignment[], data: AppData) {
   const map = new Map<string, Record<string, string | number>>();
   entries.forEach((entry) => {

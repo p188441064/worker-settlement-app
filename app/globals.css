@@ -45,6 +45,18 @@ body {
     width: 100%;
   }
 
+  .print-paper {
+    width: 100%;
+    min-height: auto;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .print-landscape {
+    width: 100%;
+  }
+
   .print-page {
     break-after: page;
     page-break-after: always;
@@ -57,5 +69,46 @@ body {
 
   .no-print {
     display: none !important;
+  }
+}
+.print-paper {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  background: #ffffff;
+  padding: 16mm;
+  color: #0f172a;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
+}
+
+.print-landscape {
+  width: 297mm;
+  min-height: 210mm;
+}
+
+.print-paper table {
+  table-layout: auto;
+}
+
+.print-paper th,
+.print-paper td {
+  vertical-align: middle;
+}
+@media print {
+  .print-paper-print-override-marker {
+    display: none;
+  }
+
+  .print-paper {
+    width: 100% !important;
+    min-height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .print-landscape {
+    width: 100% !important;
+    min-height: auto !important;
   }
 }

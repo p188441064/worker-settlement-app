@@ -10,9 +10,10 @@ import {
   getSupabaseStorageConfig,
   buildSupabaseStorageObjectUrl,
   uploadSupabaseStorageObject,
-  downloadSupabaseStorageObject
+  downloadSupabaseStorageObject,
+  listSupabaseStorageObjects
 } from "./supabase";
-import type { SupabaseEnvironmentDiagnostics, SupabaseStorageConfig } from "./supabase";
+import type { SupabaseEnvironmentDiagnostics, SupabaseStorageConfig, SupabaseStorageObject } from "./supabase";
 import { getCurrentSupabaseAccessToken } from "./supabase-auth";
 
 export const SUPABASE_CONFLICT_MESSAGE = "다른 기기에서 더 최신 데이터가 저장되었습니다.\n클라우드 데이터를 먼저 불러온 후 다시 시도하세요.";
@@ -80,6 +81,45 @@ export interface SupabaseSaveResult {
   data: AppData;
 }
 
+export interface SupabaseSnapshotListItem {
+  name: string;
+  path: string;
+  revision: number;
+  savedAt: string;
+  updatedAt: string;
+  size: number;
+}
+
+export interface SupabaseSnapshotPreview {
+  name: string;
+  path: string;
+  revision: number;
+  exportedAt: string;
+  savedAt: string;
+  size: number;
+  counts: {
+    workers: number;
+    clients: number;
+    sites: number;
+    workRequests: number;
+    assignments: number;
+    receivablePayments: number;
+  };
+  companyName: string;
+  raw: string;
+}
+
+export interface SupabaseSnapshotRestoreResult extends SupabaseSaveResult {
+  backupPath: string;
+  backupRequestUrl: string;
+  restoredFromSnapshot: string;
+  restoredAt: string;
+  restoredBy: string;
+  previousRevision: number;
+}
+
+export type SupabaseSnapshotRestoreStage = "reading" | "backingUp" | "restoring";
+
 export interface SupabaseTestResult {
   ok: boolean;
   checkedAt: string;
@@ -107,6 +147,10 @@ interface SupabaseAppDataPayload {
   schemaVersion: number;
   revision: number;
   data: AppData;
+  restoredFromSnapshot?: string;
+  restoredAt?: string;
+  restoredBy?: string;
+  previousRevision?: number;
 }
 
 export class SupabaseRevisionConflictError extends Error {
@@ -145,6 +189,15 @@ function getSupabaseSnapshotPath(revision: number, exportedAt: string) {
   return `${getOrganizationId()}/snapshots/${timestamp}-revision-${revision}.json`;
 }
 
+function getSupabaseBeforeRestoreSnapshotPath(revision: number, exportedAt: string) {
+  const timestamp = exportedAt.replace(/[:.]/g, "-");
+  return `${getOrganizationId()}/snapshots/${timestamp}-revision-${revision}-before-restore.json`;
+}
+
+function getSupabaseSnapshotPrefix() {
+  return `${getOrganizationId()}/snapshots`;
+}
+
 function getConnectionTestPath() {
   return `${getOrganizationId()}/connection-test/test.json`;
 }
@@ -157,6 +210,32 @@ function countData(data: AppData) {
     workRequests: data.workRequests.length,
     assignments: data.assignments.length,
     receivablePayments: data.receivablePayments.length
+  };
+}
+
+function normalizeListedSnapshotPath(prefix: string, object: SupabaseStorageObject) {
+  return object.name.startsWith(`${prefix}/`) ? object.name : `${prefix}/${object.name}`;
+}
+
+function snapshotFileName(path: string) {
+  return path.split("/").pop() || path;
+}
+
+function parseSnapshotFileInfo(path: string) {
+  const name = snapshotFileName(path);
+  const match = name.match(/^(.+)-revision-(\d+)(?:-before-restore)?\.json$/);
+  const revision = match ? Number(match[2]) : 0;
+  const rawTimestamp = match?.[1] || "";
+  const savedAt =
+    rawTimestamp.replace(
+      /^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})(?:-(\d{3}))?Z$/,
+      (_value, hourPrefix: string, minute: string, second: string, millisecond: string | undefined) =>
+        `${hourPrefix}:${minute}:${second}${millisecond ? `.${millisecond}` : ""}Z`
+    ) || "";
+  return {
+    name,
+    revision,
+    savedAt: Number.isNaN(Date.parse(savedAt)) ? "" : savedAt
   };
 }
 
@@ -338,6 +417,176 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionResul
 function isStoragePolicyFailure(error: unknown) {
   if (!(error instanceof Error)) return false;
   return isStoragePolicyFailureMessage(error.message);
+}
+
+export class SupabaseSnapshotOperationError extends Error {
+  constructor(
+    readonly stage: string,
+    message: string,
+    readonly status?: number
+  ) {
+    super(message);
+    this.name = "SupabaseSnapshotOperationError";
+  }
+}
+
+export function isSupabaseSnapshotOperationError(error: unknown): error is SupabaseSnapshotOperationError {
+  return error instanceof SupabaseSnapshotOperationError;
+}
+
+function httpStatusFromError(error: unknown) {
+  if (!(error instanceof Error)) return undefined;
+  const match = error.message.match(/\b(\d{3})\b/);
+  return match ? Number(match[1]) : undefined;
+}
+
+function normalizeSnapshotError(stage: string, error: unknown) {
+  if (isStoragePolicyFailure(error)) return new SupabaseSnapshotOperationError(stage, "스냅샷 접근 권한이 없습니다.", httpStatusFromError(error));
+  if (error instanceof SupabaseSnapshotOperationError) return error;
+  return new SupabaseSnapshotOperationError(stage, error instanceof Error ? error.message : "스냅샷 작업 중 오류가 발생했습니다.", httpStatusFromError(error));
+}
+
+async function readSnapshotPayload(path: string) {
+  const config = getAppDataConfig();
+  if (!config) throw new SupabaseSnapshotOperationError("설정 확인", "Supabase URL 또는 publishable key가 설정되지 않았습니다.");
+  const blob = await downloadSupabaseStorageObject(path, config, getCurrentSupabaseAccessToken());
+  if (!blob) throw new SupabaseSnapshotOperationError("스냅샷 읽기", "선택한 스냅샷 파일을 찾을 수 없습니다.", 404);
+  return {
+    path,
+    ...parsePayload(await blob.text())
+  };
+}
+
+export async function listSupabaseSnapshots(): Promise<SupabaseSnapshotListItem[]> {
+  const config = getAppDataConfig();
+  if (!config) throw new SupabaseSnapshotOperationError("스냅샷 목록 조회", "Supabase URL 또는 publishable key가 설정되지 않았습니다.");
+  const prefix = getSupabaseSnapshotPrefix();
+  try {
+    const objects = await listSupabaseStorageObjects(prefix, config, getCurrentSupabaseAccessToken());
+    return objects
+      .filter((object) => object.name.endsWith(".json"))
+      .map((object) => {
+        const path = normalizeListedSnapshotPath(prefix, object);
+        const info = parseSnapshotFileInfo(path);
+        return {
+          name: info.name,
+          path,
+          revision: info.revision,
+          savedAt: info.savedAt || object.updated_at || object.created_at || "",
+          updatedAt: object.updated_at || object.created_at || "",
+          size: object.metadata?.size || object.metadata?.contentLength || 0
+        };
+      })
+      .sort((a, b) => (Date.parse(b.savedAt || b.updatedAt) || 0) - (Date.parse(a.savedAt || a.updatedAt) || 0));
+  } catch (error) {
+    throw normalizeSnapshotError("스냅샷 목록 조회", error);
+  }
+}
+
+export async function previewSupabaseSnapshot(path: string): Promise<SupabaseSnapshotPreview> {
+  try {
+    const snapshot = await readSnapshotPayload(path);
+    const info = parseSnapshotFileInfo(path);
+    return {
+      name: info.name,
+      path,
+      revision: snapshot.payload.revision,
+      exportedAt: snapshot.payload.exportedAt,
+      savedAt: info.savedAt || snapshot.payload.exportedAt,
+      size: new Blob([snapshot.raw]).size,
+      counts: countData(snapshot.payload.data),
+      companyName: snapshot.payload.data.companyInfo.companyName || "-",
+      raw: snapshot.raw
+    };
+  } catch (error) {
+    throw normalizeSnapshotError("스냅샷 미리보기", error);
+  }
+}
+
+export async function downloadSupabaseSnapshotJson(path: string) {
+  try {
+    const snapshot = await readSnapshotPayload(path);
+    return {
+      name: snapshotFileName(path),
+      raw: snapshot.raw
+    };
+  } catch (error) {
+    throw normalizeSnapshotError("스냅샷 JSON 다운로드", error);
+  }
+}
+
+export async function restoreSupabaseSnapshot(
+  path: string,
+  restoredBy: string,
+  onProgress?: (stage: SupabaseSnapshotRestoreStage) => void
+): Promise<SupabaseSnapshotRestoreResult> {
+  const config = getAppDataConfig();
+  if (!config) throw new SupabaseSnapshotOperationError("설정 확인", "Supabase URL 또는 publishable key가 설정되지 않았습니다.");
+
+  let snapshot: Awaited<ReturnType<typeof readSnapshotPayload>>;
+  let current: Awaited<ReturnType<typeof readCurrentPayload>>;
+  try {
+    onProgress?.("reading");
+    snapshot = await readSnapshotPayload(path);
+  } catch (error) {
+    throw normalizeSnapshotError("복원 대상 스냅샷 읽기", error);
+  }
+
+  try {
+    current = await readCurrentPayload();
+  } catch (error) {
+    throw normalizeSnapshotError("현재 current.json 읽기", error);
+  }
+  if (!current) throw new SupabaseSnapshotOperationError("현재 current.json 읽기", "복원 전 백업할 current.json이 없습니다.", 404);
+
+  const restoredAt = new Date().toISOString();
+  const previousRevision = current.payload.revision || 0;
+  const backupPath = getSupabaseBeforeRestoreSnapshotPath(previousRevision, restoredAt);
+  const backupRequestUrl = buildSupabaseStorageObjectUrl(backupPath, config);
+  try {
+    onProgress?.("backingUp");
+    await uploadSupabaseStorageObject(backupPath, new Blob([current.raw], { type: "application/json" }), config, getCurrentSupabaseAccessToken());
+  } catch (error) {
+    throw normalizeSnapshotError("복원 전 current.json 백업", error);
+  }
+
+  const nextRevision = previousRevision + 1;
+  const restoredData = withCloudRevision(snapshot.payload.data, nextRevision, restoredAt);
+  const payload: SupabaseAppDataPayload = {
+    source: "worker-settlement-app",
+    exportedAt: restoredAt,
+    schemaVersion: restoredData.schemaVersion,
+    revision: nextRevision,
+    data: restoredData,
+    restoredFromSnapshot: path,
+    restoredAt,
+    restoredBy,
+    previousRevision
+  };
+  const currentPath = getSupabaseAppDataPath();
+  const currentRequestUrl = buildSupabaseStorageObjectUrl(currentPath, config);
+  try {
+    onProgress?.("restoring");
+    await uploadSupabaseStorageObject(currentPath, new Blob([JSON.stringify(payload)], { type: "application/json" }), config, getCurrentSupabaseAccessToken());
+  } catch (error) {
+    throw normalizeSnapshotError("current.json 복원 저장", error);
+  }
+
+  return {
+    path: currentPath,
+    currentRequestUrl,
+    snapshotPath: backupPath,
+    snapshotRequestUrl: backupRequestUrl,
+    backupPath,
+    backupRequestUrl,
+    savedAt: restoredAt,
+    revision: nextRevision,
+    data: restoredData,
+    restoredFromSnapshot: path,
+    restoredAt,
+    restoredBy,
+    previousRevision
+  };
 }
 
 export async function getSupabaseSnapshotInfo(): Promise<SupabaseSnapshotInfo> {

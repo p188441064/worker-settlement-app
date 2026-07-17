@@ -8,12 +8,17 @@ import {
   SUPABASE_CONFLICT_MESSAGE,
   checkSupabaseConnection,
   getSupabaseSnapshotInfo,
+  isSupabaseSnapshotOperationError,
   isSupabaseRevisionConflict,
+  listSupabaseSnapshots,
   loadAppDataFromSupabase,
+  downloadSupabaseSnapshotJson,
+  previewSupabaseSnapshot,
+  restoreSupabaseSnapshot,
   saveAppDataToSupabase,
   testSupabaseStorageConnection
 } from "@/lib/supabase-app-data";
-import type { SupabaseConnectionResult, SupabaseSaveResult, SupabaseSnapshotInfo, SupabaseTestResult } from "@/lib/supabase-app-data";
+import type { SupabaseConnectionResult, SupabaseSaveResult, SupabaseSnapshotInfo, SupabaseSnapshotListItem, SupabaseSnapshotPreview, SupabaseSnapshotRestoreResult, SupabaseSnapshotRestoreStage, SupabaseTestResult } from "@/lib/supabase-app-data";
 import { getSupabaseAuthSession, supabaseAuth } from "@/lib/supabase-auth";
 import type { SupabaseAuthSession } from "@/lib/supabase-auth";
 import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
@@ -626,6 +631,15 @@ export default function Home() {
     setData(result.data);
     return result;
   };
+
+  const restoreOperationalSnapshot = async (snapshotPath: string, onProgress?: (stage: SupabaseSnapshotRestoreStage) => void) => {
+    const result = await restoreSupabaseSnapshot(snapshotPath, authSession.user.id || "de00cde7-654b-48a2-9d2b-109c03e89535", onProgress);
+    lastSupabaseSaveRef.current = cloudSaveFingerprint(result.data);
+    failedSupabaseSaveRef.current = "";
+    saveAppData(result.data);
+    setData(result.data);
+    return result;
+  };
   const permittedMenus = menus.filter((menu) => canAccessMenu(data, menu.key));
 
   const changeRole = (role: UserRole) => {
@@ -745,7 +759,7 @@ export default function Home() {
           {view === "receivables" && <ReceivablesView data={data} updateData={updateData} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />}
           {view === "journal" && <WorkerJournalView data={data} />}
           {view === "rules" && <RulesView data={data} updateData={updateData} />}
-          {view === "settings" && <SettingsView data={data} updateData={updateData} authSession={authSession} onSaveOperationalData={saveOperationalData} />}
+          {view === "settings" && <SettingsView data={data} updateData={updateData} authSession={authSession} onSaveOperationalData={saveOperationalData} onRestoreSnapshot={restoreOperationalSnapshot} />}
           {view === "checklist" && <OperationChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "productionTest" && <ProductionTestChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "help" && <HelpView />}
@@ -2701,18 +2715,26 @@ function SettingsView({
   data,
   updateData,
   authSession,
-  onSaveOperationalData
+  onSaveOperationalData,
+  onRestoreSnapshot
 }: {
   data: AppData;
   updateData: (data: AppData) => void;
   authSession: SupabaseAuthSession;
   onSaveOperationalData: () => Promise<SupabaseSaveResult>;
+  onRestoreSnapshot: (snapshotPath: string, onProgress?: (stage: SupabaseSnapshotRestoreStage) => void) => Promise<SupabaseSnapshotRestoreResult>;
 }) {
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseConnectionResult | null>(null);
   const [snapshotInfo, setSnapshotInfo] = useState<SupabaseSnapshotInfo | null>(null);
   const [testResult, setTestResult] = useState<SupabaseTestResult | null>(null);
   const [operationalSaveResult, setOperationalSaveResult] = useState<SupabaseSaveResult | null>(null);
   const [cloudAction, setCloudAction] = useState<"idle" | "checking" | "saving" | "loading">("idle");
+  const [snapshotItems, setSnapshotItems] = useState<SupabaseSnapshotListItem[]>([]);
+  const [snapshotPreview, setSnapshotPreview] = useState<SupabaseSnapshotPreview | null>(null);
+  const [snapshotRestoreResult, setSnapshotRestoreResult] = useState<SupabaseSnapshotRestoreResult | null>(null);
+  const [snapshotAction, setSnapshotAction] = useState<"idle" | "listing" | "previewing" | "downloading" | "backingUp" | "restoring" | "complete" | "error">("idle");
+  const [snapshotMessage, setSnapshotMessage] = useState("");
+  const [snapshotError, setSnapshotError] = useState("");
 
   const updateCompanyInfo = (key: keyof AppData["companyInfo"], value: string) => {
     updateData({ ...data, companyInfo: { ...data.companyInfo, [key]: value } });
@@ -2870,6 +2892,136 @@ function SettingsView({
     }
   };
 
+  const formatSnapshotDate = (value: string) => {
+    if (!value) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString("ko-KR");
+  };
+
+  const formatBytes = (value: number) => {
+    if (!value) return "-";
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const downloadSnapshotRawJson = (fileName: string, raw: string) => {
+    const blob = new Blob([raw], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName || "snapshot.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const snapshotOperationLabel = () => {
+    if (snapshotAction === "listing") return "목록 불러오는 중";
+    if (snapshotAction === "previewing") return "미리보기 불러오는 중";
+    if (snapshotAction === "downloading") return "JSON 다운로드 준비 중";
+    if (snapshotAction === "backingUp") return "현재 데이터 백업 중";
+    if (snapshotAction === "restoring") return "복원 중";
+    if (snapshotAction === "complete") return "복원 완료";
+    if (snapshotAction === "error") return "오류";
+    return "대기";
+  };
+
+  const snapshotErrorMessage = (error: unknown) => {
+    if (isSupabaseSnapshotOperationError(error)) {
+      return `${error.stage}${error.status ? ` (HTTP ${error.status})` : ""}: ${error.message}`;
+    }
+    return error instanceof Error ? error.message : "스냅샷 작업 중 오류가 발생했습니다.";
+  };
+
+  const refreshSnapshotList = async () => {
+    setSnapshotAction("listing");
+    setSnapshotError("");
+    setSnapshotMessage("스냅샷 목록 불러오는 중");
+    try {
+      const items = await listSupabaseSnapshots();
+      setSnapshotItems(items);
+      setSnapshotMessage(items.length ? `${items.length}개 스냅샷을 불러왔습니다.` : "저장된 스냅샷이 없습니다.");
+      setSnapshotAction("complete");
+    } catch (error) {
+      setSnapshotError(snapshotErrorMessage(error));
+      setSnapshotAction("error");
+    }
+  };
+
+  const showSnapshotPreview = async (item: SupabaseSnapshotListItem) => {
+    setSnapshotAction("previewing");
+    setSnapshotError("");
+    setSnapshotMessage("미리보기 불러오는 중");
+    try {
+      const preview = await previewSupabaseSnapshot(item.path);
+      setSnapshotPreview(preview);
+      setSnapshotMessage("미리보기를 불러왔습니다.");
+      setSnapshotAction("complete");
+    } catch (error) {
+      setSnapshotError(snapshotErrorMessage(error));
+      setSnapshotAction("error");
+    }
+  };
+
+  const downloadSnapshotItem = async (item: SupabaseSnapshotListItem) => {
+    setSnapshotAction("downloading");
+    setSnapshotError("");
+    setSnapshotMessage("JSON 다운로드 준비 중");
+    try {
+      const snapshot = await downloadSupabaseSnapshotJson(item.path);
+      downloadSnapshotRawJson(snapshot.name, snapshot.raw);
+      setSnapshotMessage("JSON 다운로드를 시작했습니다.");
+      setSnapshotAction("complete");
+    } catch (error) {
+      setSnapshotError(snapshotErrorMessage(error));
+      setSnapshotAction("error");
+    }
+  };
+
+  const restoreSnapshotItem = async (item: SupabaseSnapshotListItem) => {
+    if (hasCloudConflict) {
+      setSnapshotAction("error");
+      setSnapshotError("충돌 상태에서는 복원할 수 없습니다. 클라우드 최신 데이터를 먼저 확인해 주세요.");
+      return;
+    }
+    if (!confirm("선택한 스냅샷으로 복원하시겠습니까?")) return;
+    if (!confirm("현재 데이터는 복원 직전에 별도 스냅샷으로 백업됩니다. 계속하시겠습니까?")) return;
+
+    setSnapshotAction("backingUp");
+    setSnapshotError("");
+    setSnapshotMessage("현재 데이터 백업 중");
+    try {
+      const result = await onRestoreSnapshot(item.path, (stage) => {
+        if (stage === "backingUp") {
+          setSnapshotAction("backingUp");
+          setSnapshotMessage("현재 데이터 백업 중");
+        }
+        if (stage === "restoring") {
+          setSnapshotAction("restoring");
+          setSnapshotMessage("복원 중");
+        }
+      });
+      setSnapshotRestoreResult(result);
+      setOperationalSaveResult(result);
+      setSnapshotInfo({
+        configured: true,
+        snapshotFound: true,
+        revision: result.revision,
+        exportedAt: result.savedAt,
+        appDataPath: result.path,
+        checkedAt: result.savedAt,
+        message: "스냅샷 복원이 완료되었습니다."
+      });
+      setSnapshotMessage("복원 완료");
+      setSnapshotAction("complete");
+      alert(`스냅샷 복원 완료\ncurrent: ${result.path}\nrevision: ${result.revision}\n복원 전 백업: ${result.backupPath}`);
+    } catch (error) {
+      setSnapshotError(snapshotErrorMessage(error));
+      setSnapshotAction("error");
+    }
+  };
+
   useEffect(() => {
     runSupabaseCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2903,6 +3055,8 @@ function SettingsView({
       supabaseDiagnostics.projectRef
   );
   const canUseOperationalCloudData = OPERATIONAL_SUPABASE_APP_DATA_ENABLED && canRunSupabaseStorageTest;
+  const canUseSnapshotTools = Boolean(authSession && canUseOperationalCloudData);
+  const snapshotBusy = ["listing", "previewing", "downloading", "backingUp", "restoring"].includes(snapshotAction);
 
   return (
     <div className="space-y-5">
@@ -3027,6 +3181,116 @@ function SettingsView({
           </div>
         )}
         <p className="mt-3 text-xs text-slate-500">테스트 저장 확인은 connection-test/test.json만 사용하며, 운영 동기화는 local-org/current.json과 snapshots 경로를 별도로 사용합니다.</p>
+      </Panel>
+
+      <Panel
+        title="백업 및 복원"
+        actions={
+          <Button variant="secondary" onClick={refreshSnapshotList} disabled={!canUseSnapshotTools || snapshotBusy}>
+            스냅샷 목록 새로고침
+          </Button>
+        }
+      >
+        <div className="grid grid-cols-1 gap-3 text-sm lg:grid-cols-4">
+          <div className="rounded-md border border-navy-100 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-500">작업 상태</p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <b className="text-navy-900">{snapshotOperationLabel()}</b>
+              <Badge tone={snapshotAction === "error" ? "rose" : snapshotBusy ? "amber" : "mint"}>
+                {snapshotAction === "error" ? "오류" : snapshotBusy ? "진행 중" : "대기"}
+              </Badge>
+            </div>
+            <p className="mt-2 text-slate-600">{snapshotMessage || "스냅샷 목록을 새로고침해 주세요."}</p>
+          </div>
+          <div className="rounded-md border border-navy-100 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-500">스냅샷 경로</p>
+            <p className="mt-2 break-all font-bold text-navy-900">local-org/snapshots/</p>
+            <p className="mt-2 text-slate-600">삭제 기능은 제공하지 않습니다.</p>
+          </div>
+          <div className="rounded-md border border-navy-100 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-500">복원 가능 여부</p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <b className="text-navy-900">{hasCloudConflict ? "충돌 상태" : canUseSnapshotTools ? "사용 가능" : "로그인/설정 확인 필요"}</b>
+              <Badge tone={hasCloudConflict || !canUseSnapshotTools ? "amber" : "mint"}>{hasCloudConflict ? "비활성" : canUseSnapshotTools ? "활성" : "대기"}</Badge>
+            </div>
+            <p className="mt-2 text-slate-600">복원 전 현재 current.json을 별도 스냅샷으로 먼저 백업합니다.</p>
+          </div>
+          <div className="rounded-md border border-navy-100 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-500">최근 복원</p>
+            <p className="mt-2 font-bold text-navy-900">revision {snapshotRestoreResult?.revision ?? "-"}</p>
+            <p className="mt-2 break-all text-slate-600">{snapshotRestoreResult?.backupPath || "복원 이력이 없습니다."}</p>
+          </div>
+        </div>
+
+        {!canUseSnapshotTools && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            로그인 세션과 Supabase 설정이 확인된 뒤 스냅샷 목록, 미리보기, 복원을 사용할 수 있습니다.
+          </div>
+        )}
+        {hasCloudConflict && (
+          <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">
+            충돌 상태에서는 복원 버튼이 비활성화됩니다. 클라우드 최신 데이터를 먼저 확인해 주세요.
+          </div>
+        )}
+        {snapshotError && (
+          <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">
+            {snapshotError}
+          </div>
+        )}
+
+        <div className="mt-4">
+          <DataTable>
+            <table className="w-full border-collapse">
+              <thead>
+                <tr>
+                  {["저장 일시", "파일명", "revision", "크기", "작업"].map((header) => <th key={header} className={th}>{header}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {snapshotItems.map((item) => (
+                  <tr key={item.path}>
+                    <td className={td}>{formatSnapshotDate(item.savedAt || item.updatedAt)}</td>
+                    <td className={`${td} break-all`}>{item.name}</td>
+                    <td className={td}>{item.revision || "-"}</td>
+                    <td className={td}>{formatBytes(item.size)}</td>
+                    <td className={td}>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="secondary" onClick={() => showSnapshotPreview(item)} disabled={!canUseSnapshotTools || snapshotBusy}>미리보기</Button>
+                        <Button variant="secondary" onClick={() => downloadSnapshotItem(item)} disabled={!canUseSnapshotTools || snapshotBusy}>JSON 다운로드</Button>
+                        <Button onClick={() => restoreSnapshotItem(item)} disabled={!canUseSnapshotTools || snapshotBusy || hasCloudConflict}>복원</Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {snapshotItems.length === 0 && (
+                  <tr><td className={td} colSpan={5}>스냅샷 목록을 새로고침해 주세요.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </DataTable>
+        </div>
+
+        {snapshotPreview && (
+          <div className="mt-4 rounded-md border border-navy-100 bg-navy-50 p-4 text-sm text-slate-700">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-500">읽기 전용 미리보기</p>
+                <h3 className="mt-1 break-all text-base font-bold text-navy-900">{snapshotPreview.name}</h3>
+                <p className="mt-2 text-xs text-slate-500">주민번호, 계좌번호, 연락처 등 민감 정보는 화면에 펼치지 않습니다.</p>
+              </div>
+              <Button variant="secondary" onClick={() => downloadSnapshotRawJson(snapshotPreview.name, snapshotPreview.raw)} disabled={snapshotBusy}>JSON 전체 다운로드</Button>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-md bg-white p-3"><p className="text-xs text-slate-500">revision</p><b className="text-navy-900">{snapshotPreview.revision}</b></div>
+              <div className="rounded-md bg-white p-3"><p className="text-xs text-slate-500">저장 시각</p><b className="text-navy-900">{formatSnapshotDate(snapshotPreview.savedAt || snapshotPreview.exportedAt)}</b></div>
+              <div className="rounded-md bg-white p-3"><p className="text-xs text-slate-500">근로자 수</p><b className="text-navy-900">{snapshotPreview.counts.workers}</b></div>
+              <div className="rounded-md bg-white p-3"><p className="text-xs text-slate-500">거래현장 수</p><b className="text-navy-900">{snapshotPreview.counts.clients + snapshotPreview.counts.sites}</b></div>
+              <div className="rounded-md bg-white p-3"><p className="text-xs text-slate-500">요청/배치 데이터 수</p><b className="text-navy-900">{snapshotPreview.counts.workRequests + snapshotPreview.counts.assignments}</b></div>
+              <div className="rounded-md bg-white p-3"><p className="text-xs text-slate-500">월말 정산 데이터 수</p><b className="text-navy-900">{snapshotPreview.counts.receivablePayments}</b></div>
+              <div className="rounded-md bg-white p-3 sm:col-span-2"><p className="text-xs text-slate-500">회사명</p><b className="break-words text-navy-900">{snapshotPreview.companyName}</b></div>
+            </div>
+          </div>
+        )}
       </Panel>
 
       <Panel title="역할 및 메뉴 접근 권한">

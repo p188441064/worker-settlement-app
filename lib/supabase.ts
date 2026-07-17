@@ -9,6 +9,22 @@ export interface SupabaseStorageConfig {
   bucket: string;
 }
 
+export interface SupabaseStorageObject {
+  name: string;
+  id?: string;
+  updated_at?: string;
+  created_at?: string;
+  last_accessed_at?: string;
+  metadata?: {
+    size?: number;
+    mimetype?: string;
+    cacheControl?: string;
+    lastModified?: string;
+    contentLength?: number;
+    eTag?: string;
+  };
+}
+
 export interface SupabaseEnvironmentDiagnostics {
   urlConfigured: boolean;
   projectRef: string;
@@ -146,6 +162,30 @@ export async function downloadSupabaseStorageObject(path: string, config = getSu
     throw await createSupabaseStorageError("download", response, detail);
   }
   return response.blob();
+}
+
+export async function listSupabaseStorageObjects(prefix: string, config = getSupabaseStorageConfig(), accessToken?: string) {
+  if (!config) return [] as SupabaseStorageObject[];
+  const authHeaders = getSupabaseAuthHeaders(config, accessToken);
+  if (!authHeaders) return [] as SupabaseStorageObject[];
+  const response = await fetch(`${config.url}/storage/v1/object/list/${encodeURIComponent(config.bucket)}`, {
+    method: "POST",
+    headers: {
+      ...authHeaders,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      prefix,
+      limit: 100,
+      offset: 0,
+      sortBy: {
+        column: "name",
+        order: "desc"
+      }
+    })
+  });
+  if (!response.ok) throw await createSupabaseStorageError("list", response);
+  return (await response.json()) as SupabaseStorageObject[];
 }
 
 export async function deleteSupabaseStorageObject(path: string, config = getSupabaseStorageConfig(), accessToken?: string) {

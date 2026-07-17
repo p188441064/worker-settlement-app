@@ -37,7 +37,12 @@ export function createDefaultCloudSyncConfig(): CloudSyncConfig {
     lastSyncedAt: "",
     lastError: "",
     storageProvider: "localStorage",
-    attachmentProvider: "localStorage"
+    attachmentProvider: "localStorage",
+    localRevision: 0,
+    cloudRevision: 0,
+    lastCloudCheckedAt: "",
+    conflict: false,
+    conflictMessage: ""
   };
 }
 

@@ -244,6 +244,11 @@ export interface CloudSyncConfig {
   lastError: string;
   storageProvider: "localStorage" | "supabase";
   attachmentProvider: "localStorage" | "supabaseStorage";
+  localRevision: number;
+  cloudRevision: number;
+  lastCloudCheckedAt: string;
+  conflict: boolean;
+  conflictMessage: string;
 }
 
 export interface MenuPermission {

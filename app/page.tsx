@@ -1,9 +1,19 @@
 "use client";
 
-import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
 import { clearAppData, exportAppData, importAppData, loadAppData, resetAppData, resetSampleData, saveAppData, createId } from "@/lib/storage";
+import {
+  SUPABASE_CONFLICT_MESSAGE,
+  checkSupabaseConnection,
+  getSupabaseSnapshotInfo,
+  isSupabaseRevisionConflict,
+  loadAppDataFromSupabase,
+  saveAppDataToSupabase,
+  testSupabaseStorageConnection
+} from "@/lib/supabase-app-data";
+import type { SupabaseConnectionResult, SupabaseSnapshotInfo, SupabaseTestResult } from "@/lib/supabase-app-data";
 import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
@@ -206,17 +216,191 @@ function getWorkerWorkSummary(workerId: string, data: AppData) {
   };
 }
 
+function cloudSaveFingerprint(data: AppData) {
+  return JSON.stringify({
+    ...data,
+    cloudSync: {
+      ...data.cloudSync,
+      status: "IDLE",
+      lastSyncedAt: "",
+      lastError: ""
+    }
+  });
+}
+
+function hasLocalBusinessData(data: AppData) {
+  return Boolean(
+    data.workers.length ||
+      data.clients.length ||
+      data.sites.length ||
+      data.workEntries.length ||
+      data.workRequests.length ||
+      data.assignments.length ||
+      data.receivablePayments.length ||
+      data.companyInfo.companyName ||
+      data.companyInfo.businessNumber ||
+      data.companyInfo.companyRepresentative ||
+      data.companyInfo.companyAddress ||
+      data.companyInfo.companyPhone ||
+      data.companyInfo.bankAccountText
+  );
+}
+
+function isLikelySampleData(data: AppData) {
+  return Boolean(
+    data.companyInfo.companyName === "주식회사 샘플인력" ||
+      data.workers.some((worker) => worker.id.startsWith("w-00") && worker.phone.startsWith("010-1000")) ||
+      data.clients.some((client) => client.email.endsWith("@example.test"))
+  );
+}
+
+function downloadAppDataBackup(data: AppData, label = "백업") {
+  const blob = new Blob([exportAppData(data)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  link.href = url;
+  link.download = `출역노임정산_${label}_${timestamp}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function Home() {
   const [data, setData] = useState<AppData | null>(null);
   const [view, setView] = useState<ViewKey>("dashboard");
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [hydrated, setHydrated] = useState(false);
+  const lastSupabaseSaveRef = useRef("");
+  const failedSupabaseSaveRef = useRef("");
+  const initialSupabaseLoadTriedRef = useRef(false);
+  const cloudRevisionCheckedRef = useRef(false);
 
   useEffect(() => {
     setData(loadAppData());
+    setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (data) saveAppData(data);
+    if (data && hydrated) saveAppData(data);
+  }, [data, hydrated]);
+
+  useEffect(() => {
+    if (!data || !hydrated || cloudRevisionCheckedRef.current) return;
+    cloudRevisionCheckedRef.current = true;
+
+    getSupabaseSnapshotInfo()
+      .then((info) => {
+        setData((current) => {
+          if (!current) return current;
+          const localRevision = current.cloudSync.localRevision || 0;
+          const hasConflict = info.snapshotFound && hasLocalBusinessData(current) && localRevision !== info.revision;
+          return {
+            ...current,
+            cloudSync: {
+              ...current.cloudSync,
+              cloudRevision: info.revision,
+              lastCloudCheckedAt: info.checkedAt,
+              conflict: hasConflict,
+              conflictMessage: hasConflict ? SUPABASE_CONFLICT_MESSAGE : "",
+              status: hasConflict ? "ERROR" : current.cloudSync.status,
+              lastError: hasConflict ? SUPABASE_CONFLICT_MESSAGE : current.cloudSync.lastError
+            }
+          };
+        });
+      })
+      .catch((error) => {
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                cloudSync: {
+                  ...current.cloudSync,
+                  status: "ERROR",
+                  lastError: error instanceof Error ? error.message : "클라우드 revision 확인 중 오류가 발생했습니다."
+                }
+              }
+            : current
+        );
+      });
+  }, [data, hydrated]);
+
+  useEffect(() => {
+    if (!data || !hydrated || initialSupabaseLoadTriedRef.current || hasLocalBusinessData(data)) return;
+    initialSupabaseLoadTriedRef.current = true;
+
+    getSupabaseSnapshotInfo()
+      .then((result) => {
+        if (!result.snapshotFound) return undefined;
+        return loadAppDataFromSupabase();
+      })
+      .then((cloudResult) => {
+        if (!cloudResult) return;
+        setData({
+          ...cloudResult.data,
+          cloudSync: {
+            ...cloudResult.data.cloudSync,
+            mode: "SUPABASE_ACTIVE",
+            status: "SUCCESS",
+            storageProvider: "supabase",
+            attachmentProvider: "supabaseStorage",
+            localRevision: cloudResult.revision,
+            cloudRevision: cloudResult.revision,
+            lastSyncedAt: cloudResult.exportedAt || new Date().toISOString(),
+            lastCloudCheckedAt: cloudResult.checkedAt,
+            conflict: false,
+            conflictMessage: "",
+            lastError: ""
+          }
+        });
+      })
+      .catch(() => {
+        // Keep localStorage as the source of truth when the initial cloud read is unavailable.
+      });
+  }, [data, hydrated]);
+
+  useEffect(() => {
+    if (
+      !data ||
+      !hydrated ||
+      data.cloudSync.mode !== "SUPABASE_ACTIVE" ||
+      data.cloudSync.storageProvider !== "supabase" ||
+      data.cloudSync.conflict ||
+      !hasLocalBusinessData(data) ||
+      isLikelySampleData(data)
+    ) {
+      return;
+    }
+    const fingerprint = cloudSaveFingerprint(data);
+    if (lastSupabaseSaveRef.current === fingerprint || failedSupabaseSaveRef.current === fingerprint) return;
+
+    const timer = window.setTimeout(() => {
+      saveAppDataToSupabase(data)
+        .then((result) => {
+          lastSupabaseSaveRef.current = cloudSaveFingerprint(result.data);
+          failedSupabaseSaveRef.current = "";
+          setData(result.data);
+        })
+        .catch((error) => {
+          failedSupabaseSaveRef.current = fingerprint;
+          setData((current) =>
+            current
+              ? {
+                  ...current,
+                  cloudSync: {
+                    ...current.cloudSync,
+                    status: "ERROR",
+                    cloudRevision: isSupabaseRevisionConflict(error) ? error.cloudRevision : current.cloudSync.cloudRevision,
+                    conflict: isSupabaseRevisionConflict(error) ? true : current.cloudSync.conflict,
+                    conflictMessage: isSupabaseRevisionConflict(error) ? SUPABASE_CONFLICT_MESSAGE : current.cloudSync.conflictMessage,
+                    lastError: error instanceof Error ? error.message : "Supabase 저장 중 오류가 발생했습니다."
+                  }
+                }
+              : current
+          );
+        });
+    }, 900);
+
+    return () => window.clearTimeout(timer);
   }, [data]);
 
   if (!data) {
@@ -322,6 +506,17 @@ export default function Home() {
         </header>
 
         <div className="space-y-5 p-4 lg:p-8">
+          {data.cloudSync.conflict && (
+            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-bold">클라우드 동기화 충돌</p>
+                  <p className="mt-1 whitespace-pre-line">{data.cloudSync.conflictMessage || SUPABASE_CONFLICT_MESSAGE}</p>
+                </div>
+                <Button variant="secondary" onClick={() => setView("settings")}>설정에서 선택하기</Button>
+              </div>
+            </div>
+          )}
           {view === "dashboard" && <Dashboard data={data} selectedMonth={selectedMonth} />}
           {view === "workers" && <WorkersView data={data} updateData={updateData} />}
           {view === "clients" && <ClientsSitesView data={data} updateData={updateData} />}
@@ -2283,6 +2478,11 @@ function WorkerJournalView({ data }: { data: AppData }) {
 }
 
 function SettingsView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseConnectionResult | null>(null);
+  const [snapshotInfo, setSnapshotInfo] = useState<SupabaseSnapshotInfo | null>(null);
+  const [testResult, setTestResult] = useState<SupabaseTestResult | null>(null);
+  const [cloudAction, setCloudAction] = useState<"idle" | "checking" | "saving" | "loading">("idle");
+
   const updateCompanyInfo = (key: keyof AppData["companyInfo"], value: string) => {
     updateData({ ...data, companyInfo: { ...data.companyInfo, [key]: value } });
   };
@@ -2317,6 +2517,133 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
     updateData({ ...data, accessControl: { ...data.accessControl, sensitiveProtectionEnabled: checked } });
   };
 
+  const runSupabaseCheck = async () => {
+    setCloudAction("checking");
+    try {
+      const result = await checkSupabaseConnection();
+      setSupabaseStatus(result);
+      if (result.ok) {
+        updateData({
+          ...data,
+          cloudSync: {
+            ...data.cloudSync,
+            mode: data.cloudSync.mode === "LOCAL_ONLY" ? "SUPABASE_READY" : data.cloudSync.mode,
+            status: "SUCCESS",
+            lastCloudCheckedAt: result.checkedAt,
+            lastError: ""
+          }
+        });
+      }
+    } finally {
+      setCloudAction("idle");
+    }
+  };
+
+  const refreshCloudSnapshotInfo = async () => {
+    setCloudAction("checking");
+    try {
+      const result = await getSupabaseSnapshotInfo();
+      setSnapshotInfo(result);
+      const localRevision = data.cloudSync.localRevision || 0;
+      const hasConflict = result.snapshotFound && hasLocalBusinessData(data) && localRevision !== result.revision;
+      updateData({
+        ...data,
+        cloudSync: {
+          ...data.cloudSync,
+          cloudRevision: result.revision,
+          lastCloudCheckedAt: result.checkedAt,
+          conflict: hasConflict,
+          conflictMessage: hasConflict ? SUPABASE_CONFLICT_MESSAGE : "",
+          status: hasConflict ? "ERROR" : data.cloudSync.status,
+          lastError: hasConflict ? SUPABASE_CONFLICT_MESSAGE : data.cloudSync.lastError
+        }
+      });
+    } catch (error) {
+      updateData({
+        ...data,
+        cloudSync: {
+          ...data.cloudSync,
+          status: "ERROR",
+          lastError: error instanceof Error ? error.message : "클라우드 revision 확인 중 오류가 발생했습니다."
+        }
+      });
+    } finally {
+      setCloudAction("idle");
+    }
+  };
+
+  const runSupabaseStorageTest = async () => {
+    setCloudAction("saving");
+    try {
+      const result = await testSupabaseStorageConnection();
+      setTestResult(result);
+      updateData({
+        ...data,
+        cloudSync: {
+          ...data.cloudSync,
+          status: "SUCCESS",
+          lastCloudCheckedAt: result.checkedAt,
+          lastError: ""
+        }
+      });
+      alert(`Supabase 테스트 저장 확인 완료\n경로: ${result.testPath}\n운영 current.json은 읽거나 쓰지 않았습니다.`);
+    } catch (error) {
+      updateData({
+        ...data,
+        cloudSync: {
+          ...data.cloudSync,
+          status: "ERROR",
+          lastError: error instanceof Error ? error.message : "Supabase 테스트 저장 확인 중 오류가 발생했습니다."
+        }
+      });
+      alert(error instanceof Error ? error.message : "Supabase 테스트 저장 확인 중 오류가 발생했습니다.");
+    } finally {
+      setCloudAction("idle");
+    }
+  };
+
+  const loadLatestCloudData = async () => {
+    setCloudAction("loading");
+    try {
+      downloadAppDataBackup(data, "클라우드불러오기전_로컬백업");
+      const ok = confirm("현재 localStorage 데이터를 JSON 파일로 먼저 백업했습니다.\nSupabase 최신 데이터를 불러와 현재 화면과 localStorage를 갱신할까요?");
+      if (!ok) return;
+      const cloudResult = await loadAppDataFromSupabase();
+      if (!cloudResult) {
+        alert("Supabase에 저장된 앱 데이터가 아직 없습니다.");
+        return;
+      }
+      updateData({
+        ...cloudResult.data,
+        cloudSync: {
+          ...cloudResult.data.cloudSync,
+          mode: "SUPABASE_ACTIVE",
+          status: "SUCCESS",
+          storageProvider: "supabase",
+          attachmentProvider: "supabaseStorage",
+          localRevision: cloudResult.revision,
+          cloudRevision: cloudResult.revision,
+          lastSyncedAt: cloudResult.exportedAt || new Date().toISOString(),
+          lastCloudCheckedAt: cloudResult.checkedAt,
+          conflict: false,
+          conflictMessage: "",
+          lastError: ""
+        }
+      });
+      setSnapshotInfo(cloudResult);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Supabase 데이터 읽기 중 오류가 발생했습니다.");
+    } finally {
+      setCloudAction("idle");
+    }
+  };
+
+  useEffect(() => {
+    runSupabaseCheck();
+    refreshCloudSnapshotInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const accessControl = data.accessControl;
   const readinessChecks = [
     { label: "메뉴 권한", ok: menus.every((menu) => accessControl.menuPermissions.some((permission) => permission.viewKey === menu.key && permission.admin)) },
@@ -2326,8 +2653,14 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
     { label: "정산/출력 데이터", ok: data.assignments.some((assignment) => assignment.status !== "취소") },
     { label: "백업/복원 구조", ok: Boolean(data.schemaVersion && data.accessControl && data.cloudSync) },
     { label: "모바일 입력 화면", ok: true },
+    { label: "Supabase 연결", ok: data.cloudSync.mode !== "LOCAL_ONLY" && data.cloudSync.status !== "ERROR" },
     { label: "첨부파일 저장소", ok: data.cloudSync.attachmentProvider === "localStorage" || data.cloudSync.attachmentProvider === "supabaseStorage" }
   ];
+  const localRevision = data.cloudSync.localRevision || 0;
+  const cloudRevision = snapshotInfo?.revision ?? data.cloudSync.cloudRevision ?? 0;
+  const hasCloudConflict = Boolean(data.cloudSync.conflict || (snapshotInfo?.snapshotFound && hasLocalBusinessData(data) && localRevision !== cloudRevision));
+  const lastSyncLabel = data.cloudSync.lastSyncedAt || "-";
+  const lastCloudCheckedLabel = snapshotInfo?.checkedAt || data.cloudSync.lastCloudCheckedAt || "-";
 
   return (
     <div className="space-y-5">
@@ -2340,6 +2673,59 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
           <div className="lg:col-span-2"><Field label="주소"><TextInput value={data.companyInfo.companyAddress} onChange={(event) => updateCompanyInfo("companyAddress", event.target.value)} /></Field></div>
           <div className="xl:col-span-2 lg:col-span-3"><Field label="입금계좌/비고"><TextInput value={data.companyInfo.bankAccountText} onChange={(event) => updateCompanyInfo("bankAccountText", event.target.value)} /></Field></div>
         </div>
+      </Panel>
+
+      <Panel
+        title="Supabase 연결"
+        actions={
+          <>
+            <Button variant="secondary" onClick={runSupabaseCheck} disabled={cloudAction !== "idle"}>연결 확인</Button>
+            <Button variant="secondary" onClick={refreshCloudSnapshotInfo} disabled={cloudAction !== "idle" || !supabaseStatus?.ok}>클라우드 상태 새로고침</Button>
+            <Button onClick={runSupabaseStorageTest} disabled={cloudAction !== "idle" || !supabaseStatus?.ok}>테스트 저장 확인</Button>
+            <Button variant="secondary" onClick={loadLatestCloudData} disabled={cloudAction !== "idle" || !supabaseStatus?.ok}>클라우드 최신 데이터 불러오기</Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-1 gap-3 text-sm lg:grid-cols-3">
+          <div className="rounded-md border border-navy-100 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-500">연결 상태</p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <b className="text-navy-900">{cloudAction === "idle" ? "대기" : "확인 중"}</b>
+              <Badge tone={supabaseStatus?.ok ? "mint" : supabaseStatus?.configured === false || data.cloudSync.status === "ERROR" ? "rose" : "amber"}>
+                {supabaseStatus?.ok ? "연결됨" : supabaseStatus ? "확인 필요" : "미확인"}
+              </Badge>
+            </div>
+            <p className="mt-2 text-slate-600">{supabaseStatus?.message || "설정 화면을 열면 Supabase 연결을 확인합니다."}</p>
+          </div>
+          <div className="rounded-md border border-navy-100 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-500">revision</p>
+            <p className="mt-2 font-bold text-navy-900">로컬 {localRevision} / 클라우드 {cloudRevision}</p>
+            <p className="mt-2 text-slate-600">마지막 확인: {lastCloudCheckedLabel}</p>
+          </div>
+          <div className="rounded-md border border-navy-100 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-500">동기화 상태</p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <b className="text-navy-900">{hasCloudConflict ? "충돌" : data.cloudSync.status}</b>
+              <Badge tone={hasCloudConflict ? "rose" : data.cloudSync.status === "SUCCESS" ? "mint" : data.cloudSync.status === "ERROR" ? "rose" : "amber"}>
+                {hasCloudConflict ? "확인 필요" : data.cloudSync.status}
+              </Badge>
+            </div>
+            <p className="mt-2 text-slate-600">마지막 동기화: {lastSyncLabel}</p>
+          </div>
+        </div>
+        <div className="mt-3 rounded-md border border-navy-100 bg-navy-50 p-3 text-sm text-slate-700">
+          <p><b>current.json</b>: {snapshotInfo?.snapshotFound ? "저장됨" : "없음"} · <span className="break-all">{snapshotInfo?.appDataPath || "클라우드 상태 새로고침 후 표시됩니다."}</span></p>
+          <p className="mt-1"><b>테스트 파일</b>: {testResult?.testPath || "connection-test/test.json"}</p>
+        </div>
+        {hasCloudConflict && (
+          <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">
+            <p className="whitespace-pre-line">{data.cloudSync.conflictMessage || SUPABASE_CONFLICT_MESSAGE}</p>
+            <div className="mt-3">
+              <Button variant="secondary" onClick={loadLatestCloudData} disabled={cloudAction !== "idle" || !supabaseStatus?.ok}>클라우드 최신 데이터 불러오기</Button>
+            </div>
+          </div>
+        )}
+        <p className="mt-3 text-xs text-slate-500">테스트 저장 확인은 connection-test/test.json만 사용하며 운영 current.json을 읽거나 쓰지 않습니다. 충돌 상태에서는 자동 저장이 중단됩니다.</p>
       </Panel>
 
       <Panel title="역할 및 메뉴 접근 권한">

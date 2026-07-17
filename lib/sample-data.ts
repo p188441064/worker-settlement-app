@@ -218,7 +218,12 @@ export const sampleData: AppData = {
     lastSyncedAt: "",
     lastError: "",
     storageProvider: "localStorage",
-    attachmentProvider: "localStorage"
+    attachmentProvider: "localStorage",
+    localRevision: 0,
+    cloudRevision: 0,
+    lastCloudCheckedAt: "",
+    conflict: false,
+    conflictMessage: ""
   },
   receivablePayments: [
     { id: "rp-001", clientId: "c-001", siteId: "s-001", closingMonth: "2026-06", amount: 300000, paymentDate: "2026-06-20", memo: "샘플 부분입금" }

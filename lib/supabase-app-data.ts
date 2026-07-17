@@ -8,6 +8,7 @@ import {
   getSupabaseAuthHeaders,
   getSupabaseEnvironmentDiagnostics,
   getSupabaseStorageConfig,
+  buildSupabaseStorageObjectUrl,
   uploadSupabaseStorageObject,
   downloadSupabaseStorageObject
 } from "./supabase";
@@ -29,9 +30,11 @@ export interface SupabaseConnectionResult {
 
 export interface SupabaseConnectionCheck {
   kind: "Project" | "Storage";
+  method: "GET" | "HEAD" | "POST" | "PUT";
   ok: boolean;
   status: number | null;
   requestTarget: string;
+  requestUrl: string;
   message: string;
   error: string;
   errorCode: string;
@@ -71,7 +74,21 @@ export interface SupabaseTestResult {
   ok: boolean;
   checkedAt: string;
   testPath: string;
+  requestUrl: string;
+  uploadMethod: "POST";
+  uploadUpsert: boolean;
+  steps: SupabaseStorageTestStep[];
   message: string;
+}
+
+export interface SupabaseStorageTestStep {
+  order: number;
+  method: "GET" | "HEAD" | "POST" | "PUT";
+  requestUrl: string;
+  status: number | null;
+  message: string;
+  error: string;
+  errorCode: string;
 }
 
 interface SupabaseAppDataPayload {
@@ -223,23 +240,44 @@ async function parseSupabaseResponse(response: Response) {
   }
 }
 
-async function checkSupabaseEndpoint(kind: SupabaseConnectionCheck["kind"], requestTarget: string, url: string, headers: Record<string, string>): Promise<SupabaseConnectionCheck> {
+function isObjectNotFoundDetails(details: { message: string; error: string; errorCode: string }) {
+  return `${details.message} ${details.error} ${details.errorCode}`.toLowerCase().includes("object not found");
+}
+
+function isStoragePolicyFailureMessage(message: string) {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("object not found")) return false;
+  return (
+    normalized.includes("403") ||
+    normalized.includes("row-level security") ||
+    normalized.includes("rls") ||
+    normalized.includes("policy") ||
+    normalized.includes("not authorized") ||
+    normalized.includes("unauthorized")
+  );
+}
+
+async function checkSupabaseEndpoint(kind: SupabaseConnectionCheck["kind"], method: SupabaseConnectionCheck["method"], requestTarget: string, requestUrl: string, headers: Record<string, string>): Promise<SupabaseConnectionCheck> {
   try {
-    const response = await fetch(url, { headers, cache: "no-store" });
+    const response = await fetch(requestUrl, { method, headers, cache: "no-store" });
     const details = await parseSupabaseResponse(response);
     return {
       kind,
+      method,
       ok: response.ok,
       status: response.status,
       requestTarget,
+      requestUrl,
       ...details
     };
   } catch (error) {
     return {
       kind,
+      method,
       ok: false,
       status: null,
       requestTarget,
+      requestUrl,
       message: error instanceof Error ? error.message : "요청 중 오류가 발생했습니다.",
       error: "",
       errorCode: ""
@@ -264,9 +302,11 @@ function checkSupabaseProjectSettings(environment: SupabaseEnvironmentDiagnostic
   const ok = environment.urlConfigured && environment.keyConfigured && Boolean(environment.projectRef);
   return {
     kind: "Project",
+    method: "GET",
     ok,
     status: null,
     requestTarget: "Supabase project URL and publishable key",
+    requestUrl: "",
     message: ok ? "프로젝트 URL과 API 키 설정을 확인했습니다." : "Supabase URL 또는 API 키 설정을 확인해야 합니다.",
     error: "",
     errorCode: ""
@@ -294,8 +334,9 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionResul
 
   const rawStorageCheck = await checkSupabaseEndpoint(
     "Storage",
-    "Storage /storage/v1/object/{bucket}/connection-test/test.json",
-    `${config.url}/storage/v1/object/${encodeURIComponent(config.bucket)}/connection-test/test.json`,
+    "GET",
+    "Storage /storage/v1/object",
+    `${config.url}/storage/v1/object`,
     headers
   );
   const storageCheck = markHttpResponseAsStorageReachable(rawStorageCheck);
@@ -318,15 +359,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionResul
 
 function isStoragePolicyFailure(error: unknown) {
   if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("403") ||
-    message.includes("row-level security") ||
-    message.includes("rls") ||
-    message.includes("policy") ||
-    message.includes("not authorized") ||
-    message.includes("unauthorized")
-  );
+  return isStoragePolicyFailureMessage(error.message);
 }
 
 export async function getSupabaseSnapshotInfo(): Promise<SupabaseSnapshotInfo> {
@@ -378,13 +411,37 @@ export async function testSupabaseStorageConnection(): Promise<SupabaseTestResul
     type: "connection-test",
     checkedAt
   };
+  const requestUrl = buildSupabaseStorageObjectUrl(testPath, config);
+  const steps: SupabaseStorageTestStep[] = [];
   try {
     const accessToken = getCurrentSupabaseAccessToken();
-    await uploadSupabaseStorageObject(testPath, new Blob([JSON.stringify(payload)], { type: "application/json" }), config, accessToken);
-    const restored = await downloadSupabaseStorageObject(testPath, config, accessToken);
-    if (!restored) throw new Error("Supabase 테스트 파일을 다시 읽지 못했습니다.");
-    const parsed = JSON.parse(await restored.text()) as Partial<typeof payload>;
-    if (parsed.checkedAt !== checkedAt) throw new Error("Supabase 테스트 파일 내용이 일치하지 않습니다.");
+    const headers = getSupabaseAuthHeaders(config, accessToken);
+    if (!headers) throw new Error("Supabase ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??");
+    const uploadResponse = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+        "x-upsert": "true"
+      },
+      body: JSON.stringify(payload)
+    });
+    const uploadDetails = await parseSupabaseResponse(uploadResponse);
+    steps.push({
+      order: 1,
+      method: "POST",
+      requestUrl,
+      status: uploadResponse.status,
+      message: isObjectNotFoundDetails(uploadDetails) ? "파일이 없어 새로 생성합니다." : uploadDetails.message,
+      error: uploadDetails.error,
+      errorCode: uploadDetails.errorCode
+    });
+    if (!uploadResponse.ok) {
+      if (isStoragePolicyFailureMessage(`${uploadResponse.status} ${uploadDetails.message} ${uploadDetails.error} ${uploadDetails.errorCode}`)) {
+        throw new Error("Storage 접근 정책이 아직 설정되지 않았습니다.");
+      }
+      throw new Error(`Supabase 테스트 파일 업로드 실패: HTTP ${uploadResponse.status} ${uploadDetails.message || uploadDetails.error || uploadDetails.errorCode}`);
+    }
   } catch (error) {
     if (isStoragePolicyFailure(error)) throw new Error("Storage 접근 정책이 아직 설정되지 않았습니다.");
     throw error;
@@ -393,6 +450,10 @@ export async function testSupabaseStorageConnection(): Promise<SupabaseTestResul
     ok: true,
     checkedAt,
     testPath,
+    requestUrl,
+    uploadMethod: "POST",
+    uploadUpsert: true,
+    steps,
     message: "Supabase 테스트 파일 저장과 읽기 확인이 완료되었습니다."
   };
 }

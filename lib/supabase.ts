@@ -79,6 +79,11 @@ export function buildSupabasePublicUrl(path: string, config = getSupabaseStorage
   return `${config.url}/storage/v1/object/public/${config.bucket}/${encodeURI(path)}`;
 }
 
+export function buildSupabaseStorageObjectUrl(path: string, config = getSupabaseStorageConfig()) {
+  if (!config) return "";
+  return `${config.url}/storage/v1/object/${encodeURIComponent(config.bucket)}/${encodeURI(path)}`;
+}
+
 function stringFromUnknown(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -101,7 +106,8 @@ export async function uploadSupabaseStorageObject(path: string, file: Blob, conf
   if (!config) return undefined;
   const authHeaders = getSupabaseAuthHeaders(config, accessToken);
   if (!authHeaders) return undefined;
-  const response = await fetch(`${config.url}/storage/v1/object/${config.bucket}/${encodeURI(path)}`, {
+  const requestUrl = buildSupabaseStorageObjectUrl(path, config);
+  const response = await fetch(requestUrl, {
     method: "POST",
     headers: {
       ...authHeaders,
@@ -114,6 +120,7 @@ export async function uploadSupabaseStorageObject(path: string, file: Blob, conf
   return {
     bucket: config.bucket,
     path,
+    requestUrl,
     publicUrl: buildSupabasePublicUrl(path, config)
   };
 }
@@ -122,7 +129,7 @@ export async function downloadSupabaseStorageObject(path: string, config = getSu
   if (!config) return undefined;
   const authHeaders = getSupabaseAuthHeaders(config, accessToken);
   if (!authHeaders) return undefined;
-  const response = await fetch(`${config.url}/storage/v1/object/${config.bucket}/${encodeURI(path)}`, {
+  const response = await fetch(buildSupabaseStorageObjectUrl(path, config), {
     headers: authHeaders
   });
   if (response.status === 404) return undefined;

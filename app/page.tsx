@@ -2699,7 +2699,8 @@ function SettingsView({
           lastError: ""
         }
       });
-      alert(`Supabase 테스트 저장 확인 완료\n경로: ${result.testPath}\n운영 current.json은 읽거나 쓰지 않았습니다.`);
+      const firstStep = result.steps[0];
+      alert(`Supabase 테스트 저장 확인 완료\n첫 요청: ${firstStep?.method || result.uploadMethod}\nRequest URL: ${result.requestUrl}\nupsert: ${result.uploadUpsert ? "true" : "false"}\n경로: ${result.testPath}\n운영 current.json은 읽거나 쓰지 않았습니다.`);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Supabase 테스트 저장 확인 중 오류가 발생했습니다.");
     } finally {
@@ -2851,6 +2852,8 @@ function SettingsView({
         <div className="mt-3 rounded-md border border-navy-100 bg-navy-50 p-3 text-sm text-slate-700">
           <p><b>운영 AppData</b>: 로그인과 Storage 정책 설정 전이라 current.json 확인을 비활성화했습니다.</p>
           <p className="mt-1"><b>테스트 파일</b>: {testResult?.testPath || "connection-test/test.json"}</p>
+          <p className="mt-1 break-all"><b>테스트 Request URL</b>: {testResult?.requestUrl || "-"}</p>
+          <p className="mt-1"><b>테스트 첫 요청</b>: {testResult?.steps[0]?.method || "-"} / upsert: {testResult ? String(testResult.uploadUpsert) : "-"}</p>
         </div>
         {supabaseDiagnostics && (
           <div className="mt-3 grid grid-cols-1 gap-3 text-sm lg:grid-cols-2">
@@ -2877,7 +2880,8 @@ function SettingsView({
                       <b>{check.kind}</b>
                       <Badge tone={check.ok ? "mint" : "rose"}>{check.status ?? "요청 실패"}</Badge>
                     </div>
-                    <p className="mt-1">요청: {check.requestTarget}</p>
+                    <p className="mt-1">요청: {check.method} {check.requestTarget}</p>
+                    <p className="mt-1 break-all">Request URL: {check.requestUrl || "-"}</p>
                     <p className="mt-1">상태: {check.ok ? (check.kind === "Storage" ? "Storage API 응답 확인됨" : "설정 확인됨") : "확인 필요"}</p>
                     <p className="mt-1">HTTP 상태 코드: {check.status ?? "-"}</p>
                     <p className="mt-1">message: {check.message || "-"}</p>

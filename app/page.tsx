@@ -2522,18 +2522,6 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
     try {
       const result = await checkSupabaseConnection();
       setSupabaseStatus(result);
-      if (result.ok) {
-        updateData({
-          ...data,
-          cloudSync: {
-            ...data.cloudSync,
-            mode: data.cloudSync.mode === "LOCAL_ONLY" ? "SUPABASE_READY" : data.cloudSync.mode,
-            status: "SUCCESS",
-            lastCloudCheckedAt: result.checkedAt,
-            lastError: ""
-          }
-        });
-      }
     } finally {
       setCloudAction("idle");
     }
@@ -2577,25 +2565,8 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
     try {
       const result = await testSupabaseStorageConnection();
       setTestResult(result);
-      updateData({
-        ...data,
-        cloudSync: {
-          ...data.cloudSync,
-          status: "SUCCESS",
-          lastCloudCheckedAt: result.checkedAt,
-          lastError: ""
-        }
-      });
       alert(`Supabase 테스트 저장 확인 완료\n경로: ${result.testPath}\n운영 current.json은 읽거나 쓰지 않았습니다.`);
     } catch (error) {
-      updateData({
-        ...data,
-        cloudSync: {
-          ...data.cloudSync,
-          status: "ERROR",
-          lastError: error instanceof Error ? error.message : "Supabase 테스트 저장 확인 중 오류가 발생했습니다."
-        }
-      });
       alert(error instanceof Error ? error.message : "Supabase 테스트 저장 확인 중 오류가 발생했습니다.");
     } finally {
       setCloudAction("idle");
@@ -2640,7 +2611,6 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
 
   useEffect(() => {
     runSupabaseCheck();
-    refreshCloudSnapshotInfo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2661,6 +2631,8 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
   const hasCloudConflict = Boolean(data.cloudSync.conflict || (snapshotInfo?.snapshotFound && hasLocalBusinessData(data) && localRevision !== cloudRevision));
   const lastSyncLabel = data.cloudSync.lastSyncedAt || "-";
   const lastCloudCheckedLabel = snapshotInfo?.checkedAt || data.cloudSync.lastCloudCheckedAt || "-";
+  const supabaseDiagnostics = supabaseStatus?.environment;
+  const supabaseChecks = supabaseStatus?.checks || [];
 
   return (
     <div className="space-y-5">
@@ -2717,6 +2689,39 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
           <p><b>current.json</b>: {snapshotInfo?.snapshotFound ? "저장됨" : "없음"} · <span className="break-all">{snapshotInfo?.appDataPath || "클라우드 상태 새로고침 후 표시됩니다."}</span></p>
           <p className="mt-1"><b>테스트 파일</b>: {testResult?.testPath || "connection-test/test.json"}</p>
         </div>
+        {supabaseDiagnostics && (
+          <div className="mt-3 grid grid-cols-1 gap-3 text-sm lg:grid-cols-2">
+            <div className="rounded-md border border-navy-100 bg-white p-3 text-slate-700">
+              <p className="text-xs font-semibold text-slate-500">환경변수 진단</p>
+              <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
+                <p>URL 설정: <b>{supabaseDiagnostics.urlConfigured ? "예" : "아니오"}</b></p>
+                <p>프로젝트 ref: <b>{supabaseDiagnostics.projectRef || "-"}</b></p>
+                <p>키 설정: <b>{supabaseDiagnostics.keyConfigured ? "예" : "아니오"}</b></p>
+                <p>키 종류: <b>{supabaseDiagnostics.keyKind}</b></p>
+                <p>키 앞 6글자: <b>{supabaseDiagnostics.keyPrefix || "-"}</b></p>
+                <p>앞뒤 공백: <b>{supabaseDiagnostics.keyHasSurroundingWhitespace ? "있음" : "없음"}</b></p>
+                <p>키 길이: <b>{supabaseDiagnostics.keyLength}</b></p>
+              </div>
+            </div>
+            <div className="rounded-md border border-navy-100 bg-white p-3 text-slate-700">
+              <p className="text-xs font-semibold text-slate-500">요청 단계 진단</p>
+              <div className="mt-2 space-y-2">
+                {supabaseChecks.length ? supabaseChecks.map((check) => (
+                  <div key={check.kind} className="rounded-md bg-navy-50 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <b>{check.kind}</b>
+                      <Badge tone={check.ok ? "mint" : "rose"}>{check.status ?? "요청 실패"}</Badge>
+                    </div>
+                    <p className="mt-1">요청: {check.requestTarget}</p>
+                    <p className="mt-1">message: {check.message || "-"}</p>
+                    <p className="mt-1">error: {check.error || "-"}</p>
+                    <p className="mt-1">error_code: {check.errorCode || "-"}</p>
+                  </div>
+                )) : <p>연결 확인 후 REST와 Storage 결과가 표시됩니다.</p>}
+              </div>
+            </div>
+          </div>
+        )}
         {hasCloudConflict && (
           <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">
             <p className="whitespace-pre-line">{data.cloudSync.conflictMessage || SUPABASE_CONFLICT_MESSAGE}</p>

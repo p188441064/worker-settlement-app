@@ -9,9 +9,59 @@ export interface SupabaseStorageConfig {
   bucket: string;
 }
 
+export interface SupabaseEnvironmentDiagnostics {
+  urlConfigured: boolean;
+  projectRef: string;
+  keyConfigured: boolean;
+  keyKind: "publishable" | "legacy anon" | "unknown";
+  keyPrefix: string;
+  keyHasSurroundingWhitespace: boolean;
+  keyLength: number;
+}
+
+function getRawSupabaseUrl() {
+  return process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+}
+
+function getRawSupabaseKey() {
+  return process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+}
+
+function getKeyKind(key: string): SupabaseEnvironmentDiagnostics["keyKind"] {
+  if (key.startsWith("sb_publishable_")) return "publishable";
+  if (key.startsWith("eyJ")) return "legacy anon";
+  return "unknown";
+}
+
+function getProjectRef(url: string) {
+  try {
+    const hostname = new URL(url).hostname;
+    const [ref] = hostname.split(".");
+    return ref || "";
+  } catch {
+    return "";
+  }
+}
+
+export function getSupabaseEnvironmentDiagnostics(): SupabaseEnvironmentDiagnostics {
+  const rawUrl = getRawSupabaseUrl();
+  const rawKey = getRawSupabaseKey();
+  const url = rawUrl.trim();
+  const key = rawKey.trim();
+  return {
+    urlConfigured: Boolean(url),
+    projectRef: getProjectRef(url),
+    keyConfigured: Boolean(key),
+    keyKind: getKeyKind(key),
+    keyPrefix: key.slice(0, 6),
+    keyHasSurroundingWhitespace: rawKey !== key,
+    keyLength: rawKey.length
+  };
+}
+
 export function getSupabaseStorageConfig(): SupabaseStorageConfig | undefined {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = getRawSupabaseUrl().trim();
+  const publishableKey = getRawSupabaseKey().trim();
   if (!url || !publishableKey) return undefined;
   return {
     url: url.replace(/\/$/, ""),

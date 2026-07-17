@@ -6,11 +6,12 @@ import {
   APP_DATA_BUCKET,
   getSupabaseAppConfig,
   getSupabaseAuthHeaders,
+  getSupabaseEnvironmentDiagnostics,
   getSupabaseStorageConfig,
   uploadSupabaseStorageObject,
   downloadSupabaseStorageObject
 } from "./supabase";
-import type { SupabaseStorageConfig } from "./supabase";
+import type { SupabaseEnvironmentDiagnostics, SupabaseStorageConfig } from "./supabase";
 
 export const SUPABASE_CONFLICT_MESSAGE = "다른 기기에서 더 최신 데이터가 저장되었습니다.\n클라우드 데이터를 먼저 불러온 후 다시 시도하세요.";
 
@@ -19,6 +20,18 @@ export interface SupabaseConnectionResult {
   ok: boolean;
   message: string;
   checkedAt: string;
+  environment: SupabaseEnvironmentDiagnostics;
+  checks: SupabaseConnectionCheck[];
+}
+
+export interface SupabaseConnectionCheck {
+  kind: "REST" | "Storage";
+  ok: boolean;
+  status: number | null;
+  requestTarget: string;
+  message: string;
+  error: string;
+  errorCode: string;
 }
 
 export interface SupabaseSnapshotInfo {
@@ -187,8 +200,53 @@ function assertRevisionMatches(localRevision: number, cloudRevision: number) {
   if (localRevision !== cloudRevision) throw new SupabaseRevisionConflictError(localRevision, cloudRevision);
 }
 
+function stringFromUnknown(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+async function parseSupabaseResponse(response: Response) {
+  const fallbackMessage = response.ok ? "요청이 성공했습니다." : `HTTP ${response.status}`;
+  try {
+    const text = await response.text();
+    if (!text) return { message: fallbackMessage, error: "", errorCode: "" };
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    return {
+      message: stringFromUnknown(parsed.message) || stringFromUnknown(parsed.msg) || fallbackMessage,
+      error: stringFromUnknown(parsed.error),
+      errorCode: stringFromUnknown(parsed.error_code) || stringFromUnknown(parsed.code)
+    };
+  } catch {
+    return { message: fallbackMessage, error: "", errorCode: "" };
+  }
+}
+
+async function checkSupabaseEndpoint(kind: SupabaseConnectionCheck["kind"], requestTarget: string, url: string, headers: Record<string, string>): Promise<SupabaseConnectionCheck> {
+  try {
+    const response = await fetch(url, { headers, cache: "no-store" });
+    const details = await parseSupabaseResponse(response);
+    return {
+      kind,
+      ok: response.ok,
+      status: response.status,
+      requestTarget,
+      ...details
+    };
+  } catch (error) {
+    return {
+      kind,
+      ok: false,
+      status: null,
+      requestTarget,
+      message: error instanceof Error ? error.message : "요청 중 오류가 발생했습니다.",
+      error: "",
+      errorCode: ""
+    };
+  }
+}
+
 export async function checkSupabaseConnection(): Promise<SupabaseConnectionResult> {
   const checkedAt = new Date().toISOString();
+  const environment = getSupabaseEnvironmentDiagnostics();
   const config = getSupabaseStorageConfig();
   const headers = getSupabaseAuthHeaders(config);
   if (!config || !headers) {
@@ -196,35 +254,28 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionResul
       configured: false,
       ok: false,
       checkedAt,
-      message: "Supabase URL 또는 publishable key가 설정되지 않았습니다."
+      message: "Supabase URL 또는 publishable key가 설정되지 않았습니다.",
+      environment,
+      checks: []
     };
   }
 
-  try {
-    const response = await fetch(`${config.url}/rest/v1/`, { headers });
-    if (!response.ok) {
-      return {
-        configured: true,
-        ok: false,
-        checkedAt,
-        message: `Supabase 응답 오류: ${response.status}`
-      };
-    }
+  const checks = await Promise.all([
+    checkSupabaseEndpoint("REST", "REST /rest/v1/", `${config.url}/rest/v1/`, headers),
+    checkSupabaseEndpoint("Storage", "Storage /storage/v1/bucket/{bucket}", `${config.url}/storage/v1/bucket/${encodeURIComponent(config.bucket)}`, headers)
+  ]);
+  const failedChecks = checks.filter((check) => !check.ok);
 
-    return {
-      configured: true,
-      ok: true,
-      checkedAt,
-      message: "Supabase 연결이 확인되었습니다."
-    };
-  } catch (error) {
-    return {
-      configured: true,
-      ok: false,
-      checkedAt,
-      message: error instanceof Error ? error.message : "Supabase 연결 확인 중 오류가 발생했습니다."
-    };
-  }
+  return {
+    configured: true,
+    ok: failedChecks.length === 0,
+    checkedAt,
+    message: failedChecks.length
+      ? `Supabase 연결 확인 실패: ${failedChecks.map((check) => `${check.kind} ${check.status ?? "요청 실패"}`).join(" / ")}`
+      : "Supabase REST와 Storage 연결이 확인되었습니다.",
+    environment,
+    checks
+  };
 }
 
 export async function getSupabaseSnapshotInfo(): Promise<SupabaseSnapshotInfo> {

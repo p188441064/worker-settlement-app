@@ -40,7 +40,7 @@ const roleLabels: Record<UserRole, string> = {
   USER: "일반사용자"
 };
 
-const OPERATIONAL_SUPABASE_APP_DATA_ENABLED = false;
+const OPERATIONAL_SUPABASE_APP_DATA_ENABLED = true;
 
 function canAccessMenu(data: AppData, viewKey: ViewKey) {
   const role = data.accessControl?.currentRole || "ADMIN";
@@ -258,6 +258,25 @@ function isLikelySampleData(data: AppData) {
   );
 }
 
+function prepareLocalDataForOperationalCloud(data: AppData, checkedAt: string): AppData {
+  return {
+    ...data,
+    cloudSync: {
+      ...data.cloudSync,
+      mode: "SUPABASE_ACTIVE",
+      status: "IDLE",
+      storageProvider: "supabase",
+      attachmentProvider: "supabaseStorage",
+      localRevision: 0,
+      cloudRevision: 0,
+      lastCloudCheckedAt: checkedAt,
+      conflict: false,
+      conflictMessage: "",
+      lastError: ""
+    }
+  };
+}
+
 function downloadAppDataBackup(data: AppData, label = "백업") {
   const blob = new Blob([exportAppData(data)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -391,8 +410,41 @@ export default function Home() {
 
   useEffect(() => {
     if (!authChecked || !authSession || hydrated) return;
-    setData(loadAppData());
-    setHydrated(true);
+    let cancelled = false;
+
+    const loadInitialData = async () => {
+      if (OPERATIONAL_SUPABASE_APP_DATA_ENABLED) {
+        initialSupabaseLoadTriedRef.current = true;
+        cloudRevisionCheckedRef.current = true;
+        try {
+          const cloudResult = await loadAppDataFromSupabase();
+          if (cancelled) return;
+          if (cloudResult) {
+            lastSupabaseSaveRef.current = cloudSaveFingerprint(cloudResult.data);
+            failedSupabaseSaveRef.current = "";
+            setData(cloudResult.data);
+            setHydrated(true);
+            return;
+          }
+        } catch (error) {
+          console.warn("Supabase current.json load failed; falling back to localStorage.", error);
+        }
+      }
+
+      if (cancelled) return;
+      const localData = loadAppData();
+      const nextData = OPERATIONAL_SUPABASE_APP_DATA_ENABLED
+        ? prepareLocalDataForOperationalCloud(localData, new Date().toISOString())
+        : localData;
+      lastSupabaseSaveRef.current = cloudSaveFingerprint(nextData);
+      setData(nextData);
+      setHydrated(true);
+    };
+
+    loadInitialData();
+    return () => {
+      cancelled = true;
+    };
   }, [authChecked, authSession, hydrated]);
 
   useEffect(() => {
@@ -2734,18 +2786,6 @@ function SettingsView({
     try {
       const result = await testSupabaseStorageConnection();
       setTestResult(result);
-      updateData({
-        ...data,
-        cloudSync: {
-          ...data.cloudSync,
-          mode: "SUPABASE_READY",
-          status: "SUCCESS",
-          storageProvider: "supabase",
-          attachmentProvider: "supabaseStorage",
-          lastCloudCheckedAt: result.checkedAt,
-          lastError: ""
-        }
-      });
       const firstStep = result.steps[0];
       alert(`Supabase 테스트 저장 확인 완료\n첫 요청: ${firstStep?.method || result.uploadMethod}\nRequest URL: ${result.requestUrl}\nupsert: ${result.uploadUpsert ? "true" : "false"}\n경로: ${result.testPath}\n운영 current.json은 읽거나 쓰지 않았습니다.`);
     } catch (error) {
@@ -2822,7 +2862,7 @@ function SettingsView({
       supabaseDiagnostics.keyConfigured &&
       supabaseDiagnostics.projectRef
   );
-  const canUseOperationalCloudData = OPERATIONAL_SUPABASE_APP_DATA_ENABLED && canRunSupabaseStorageTest && data.cloudSync.mode === "SUPABASE_ACTIVE";
+  const canUseOperationalCloudData = OPERATIONAL_SUPABASE_APP_DATA_ENABLED && canRunSupabaseStorageTest;
 
   return (
     <div className="space-y-5">
@@ -2890,7 +2930,7 @@ function SettingsView({
           </div>
         </div>
         <div className="mt-3 rounded-md border border-navy-100 bg-navy-50 p-3 text-sm text-slate-700">
-          <p><b>운영 AppData</b>: 로그인과 Storage 정책 설정 전이라 current.json 확인을 비활성화했습니다.</p>
+          <p><b>운영 AppData</b>: local-org/current.json을 먼저 읽고, 저장 시 current.json과 snapshots를 갱신합니다.</p>
           <p className="mt-1"><b>테스트 파일</b>: {testResult?.testPath || "connection-test/test.json"}</p>
           <p className="mt-1 break-all"><b>테스트 Request URL</b>: {testResult?.requestUrl || "-"}</p>
           <p className="mt-1"><b>테스트 첫 요청</b>: {testResult?.steps[0]?.method || "-"} / upsert: {testResult ? String(testResult.uploadUpsert) : "-"}</p>
@@ -2941,7 +2981,7 @@ function SettingsView({
             </div>
           </div>
         )}
-        <p className="mt-3 text-xs text-slate-500">테스트 저장 확인은 connection-test/test.json만 사용합니다. 운영 current.json과 snapshots 접근은 현재 단계에서 비활성화되어 있습니다.</p>
+        <p className="mt-3 text-xs text-slate-500">테스트 저장 확인은 connection-test/test.json만 사용하며, 운영 동기화는 local-org/current.json과 snapshots 경로를 별도로 사용합니다.</p>
       </Panel>
 
       <Panel title="역할 및 메뉴 접근 권한">

@@ -127,12 +127,12 @@ function getOrganizationId() {
 }
 
 export function getSupabaseAppDataPath() {
-  return `${getOrganizationId()}/app-data/current.json`;
+  return `${getOrganizationId()}/current.json`;
 }
 
 function getSupabaseSnapshotPath(revision: number, exportedAt: string) {
   const timestamp = exportedAt.replace(/[:.]/g, "-");
-  return `${getOrganizationId()}/app-data/snapshots/${timestamp}-revision-${revision}.json`;
+  return `${getOrganizationId()}/snapshots/${timestamp}-revision-${revision}.json`;
 }
 
 function getConnectionTestPath() {

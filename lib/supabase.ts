@@ -88,18 +88,26 @@ function stringFromUnknown(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
-async function createSupabaseStorageError(action: string, response: Response) {
-  let detail = "";
+async function readSupabaseStorageErrorDetail(response: Response) {
   try {
     const text = await response.text();
     if (text) {
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      detail = stringFromUnknown(parsed.message) || stringFromUnknown(parsed.error) || stringFromUnknown(parsed.code);
+      return stringFromUnknown(parsed.message) || stringFromUnknown(parsed.error) || stringFromUnknown(parsed.code);
     }
   } catch {
-    detail = "";
+    return "";
   }
-  return new Error(`Supabase ${action} failed: ${response.status}${detail ? ` ${detail}` : ""}`);
+  return "";
+}
+
+function isSupabaseObjectNotFound(response: Response, detail: string) {
+  return response.status === 404 || detail.toLowerCase().includes("object not found");
+}
+
+async function createSupabaseStorageError(action: string, response: Response, detail?: string) {
+  const errorDetail = detail ?? (await readSupabaseStorageErrorDetail(response));
+  return new Error(`Supabase ${action} failed: ${response.status}${errorDetail ? ` ${errorDetail}` : ""}`);
 }
 
 export async function uploadSupabaseStorageObject(path: string, file: Blob, config = getSupabaseStorageConfig(), accessToken?: string) {
@@ -132,8 +140,11 @@ export async function downloadSupabaseStorageObject(path: string, config = getSu
   const response = await fetch(buildSupabaseStorageObjectUrl(path, config), {
     headers: authHeaders
   });
-  if (response.status === 404) return undefined;
-  if (!response.ok) throw await createSupabaseStorageError("download", response);
+  if (!response.ok) {
+    const detail = await readSupabaseStorageErrorDetail(response);
+    if (isSupabaseObjectNotFound(response, detail)) return undefined;
+    throw await createSupabaseStorageError("download", response, detail);
+  }
   return response.blob();
 }
 

@@ -29,7 +29,7 @@ export interface SupabaseConnectionResult {
 }
 
 export interface SupabaseConnectionCheck {
-  kind: "Project" | "Storage";
+  kind: "Project" | "Google Login" | "Storage";
   method: "GET" | "HEAD" | "POST" | "PUT";
   ok: boolean;
   status: number | null;
@@ -257,47 +257,6 @@ function isStoragePolicyFailureMessage(message: string) {
   );
 }
 
-async function checkSupabaseEndpoint(kind: SupabaseConnectionCheck["kind"], method: SupabaseConnectionCheck["method"], requestTarget: string, requestUrl: string, headers: Record<string, string>): Promise<SupabaseConnectionCheck> {
-  try {
-    const response = await fetch(requestUrl, { method, headers, cache: "no-store" });
-    const details = await parseSupabaseResponse(response);
-    return {
-      kind,
-      method,
-      ok: response.ok,
-      status: response.status,
-      requestTarget,
-      requestUrl,
-      ...details
-    };
-  } catch (error) {
-    return {
-      kind,
-      method,
-      ok: false,
-      status: null,
-      requestTarget,
-      requestUrl,
-      message: error instanceof Error ? error.message : "요청 중 오류가 발생했습니다.",
-      error: "",
-      errorCode: ""
-    };
-  }
-}
-
-function markHttpResponseAsStorageReachable(check: SupabaseConnectionCheck): SupabaseConnectionCheck {
-  if (check.status === null) return check;
-  const maybeBucketHiddenByPolicy = `${check.message} ${check.error} ${check.errorCode}`.toLowerCase().includes("bucket not found");
-  return {
-    ...check,
-    ok: true,
-    message: maybeBucketHiddenByPolicy
-      ? "Storage API가 응답했습니다. 버킷 존재 여부는 권한 설정 전이라 판단하지 않습니다."
-      : check.message || "Storage API가 응답했습니다.",
-    error: maybeBucketHiddenByPolicy ? "" : check.error
-  };
-}
-
 function checkSupabaseProjectSettings(environment: SupabaseEnvironmentDiagnostics): SupabaseConnectionCheck {
   const ok = environment.urlConfigured && environment.keyConfigured && Boolean(environment.projectRef);
   return {
@@ -313,47 +272,56 @@ function checkSupabaseProjectSettings(environment: SupabaseEnvironmentDiagnostic
   };
 }
 
+function checkGoogleLoginSession(): SupabaseConnectionCheck {
+  const ok = Boolean(getCurrentSupabaseAccessToken());
+  return {
+    kind: "Google Login",
+    method: "GET",
+    ok,
+    status: null,
+    requestTarget: "Supabase Auth session",
+    requestUrl: "",
+    message: ok ? "Google 로그인 세션이 확인되었습니다." : "Google 로그인이 필요합니다.",
+    error: "",
+    errorCode: ""
+  };
+}
+
+function checkStorageUploadReadiness(projectOk: boolean, loginOk: boolean): SupabaseConnectionCheck {
+  const ok = projectOk && loginOk;
+  return {
+    kind: "Storage",
+    method: "POST",
+    ok,
+    status: null,
+    requestTarget: "connection-test/test.json upload",
+    requestUrl: "",
+    message: ok ? "Storage 업로드 가능 여부는 테스트 저장 버튼으로 확인합니다." : "Project 설정과 Google 로그인을 먼저 확인해야 합니다.",
+    error: "",
+    errorCode: ""
+  };
+}
+
 export async function checkSupabaseConnection(): Promise<SupabaseConnectionResult> {
   const checkedAt = new Date().toISOString();
   const environment = getSupabaseEnvironmentDiagnostics();
   const projectCheck = checkSupabaseProjectSettings(environment);
   const config = getSupabaseStorageConfig();
-  const headers = getSupabaseAuthHeaders(config, getCurrentSupabaseAccessToken());
-  if (!config || !headers) {
-    return {
-      configured: false,
-      ok: false,
-      storageApiReachable: false,
-      bucketCheckMessage: "로그인과 Storage 정책 설정 전이라 버킷 존재 여부는 확인하지 않습니다.",
-      checkedAt,
-      message: "Supabase URL 또는 publishable key가 설정되지 않았습니다.",
-      environment,
-      checks: [projectCheck]
-    };
-  }
-
-  const rawStorageCheck = await checkSupabaseEndpoint(
-    "Storage",
-    "GET",
-    "Storage /storage/v1/object",
-    `${config.url}/storage/v1/object`,
-    headers
-  );
-  const storageCheck = markHttpResponseAsStorageReachable(rawStorageCheck);
-  const storageApiReachable = storageCheck.status !== null;
-  const checks = [projectCheck, storageCheck];
-
+  const loginCheck = checkGoogleLoginSession();
+  const storageUploadCheck = checkStorageUploadReadiness(projectCheck.ok, loginCheck.ok);
+  const safeChecks = [projectCheck, loginCheck, storageUploadCheck];
   return {
-    configured: true,
-    ok: projectCheck.ok && storageApiReachable,
-    storageApiReachable,
-    bucketCheckMessage: "로그인과 Storage 정책 설정 전이라 버킷 존재 여부는 확인하지 않습니다.",
+    configured: Boolean(config),
+    ok: Boolean(config) && projectCheck.ok && loginCheck.ok && storageUploadCheck.ok,
+    storageApiReachable: storageUploadCheck.ok,
+    bucketCheckMessage: "Storage 업로드 가능 여부는 테스트 저장 버튼으로 확인합니다.",
     checkedAt,
-    message: storageApiReachable
-      ? "Supabase 프로젝트 설정과 Storage API 응답을 확인했습니다."
-      : "Storage API 응답을 확인하지 못했습니다.",
+    message:
+      Boolean(config) && projectCheck.ok && loginCheck.ok
+        ? "Project 설정과 Google 로그인 세션을 확인했습니다. Storage 업로드는 테스트 저장 버튼으로 확인합니다."
+        : "Project 설정 또는 Google 로그인 상태를 확인해야 합니다.",
     environment,
-    checks
+    checks: safeChecks
   };
 }
 

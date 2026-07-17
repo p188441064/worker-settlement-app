@@ -70,6 +70,16 @@ export interface SupabaseSaveVerification {
   };
 }
 
+export interface SupabaseSaveResult {
+  path: string;
+  currentRequestUrl: string;
+  snapshotPath?: string;
+  snapshotRequestUrl?: string;
+  savedAt: string;
+  revision: number;
+  data: AppData;
+}
+
 export interface SupabaseTestResult {
   ok: boolean;
   checkedAt: string;
@@ -442,7 +452,7 @@ export async function loadAppDataFromSupabase(): Promise<SupabaseReadResult | un
   };
 }
 
-export async function saveAppDataToSupabase(data: AppData) {
+export async function saveAppDataToSupabase(data: AppData): Promise<SupabaseSaveResult> {
   const config = getAppDataConfig();
   if (!config) throw new Error("Supabase 환경변수가 설정되지 않았습니다.");
 
@@ -454,17 +464,22 @@ export async function saveAppDataToSupabase(data: AppData) {
   const savedAt = new Date().toISOString();
   const nextRevision = cloudRevision + 1;
   let snapshotPath: string | undefined;
+  let snapshotRequestUrl: string | undefined;
   if (current) {
     snapshotPath = getSupabaseSnapshotPath(cloudRevision, current.payload.exportedAt || savedAt);
+    snapshotRequestUrl = buildSupabaseStorageObjectUrl(snapshotPath, config);
     await uploadSupabaseStorageObject(snapshotPath, new Blob([current.raw], { type: "application/json" }), config, getCurrentSupabaseAccessToken());
   }
 
   const payload = createPayload(data, nextRevision, savedAt);
   const path = getSupabaseAppDataPath();
+  const currentRequestUrl = buildSupabaseStorageObjectUrl(path, config);
   await uploadSupabaseStorageObject(path, new Blob([JSON.stringify(payload)], { type: "application/json" }), config, getCurrentSupabaseAccessToken());
   return {
     path,
+    currentRequestUrl,
     snapshotPath,
+    snapshotRequestUrl,
     savedAt,
     revision: nextRevision,
     data: payload.data

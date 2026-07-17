@@ -13,7 +13,7 @@ import {
   saveAppDataToSupabase,
   testSupabaseStorageConnection
 } from "@/lib/supabase-app-data";
-import type { SupabaseConnectionResult, SupabaseSnapshotInfo, SupabaseTestResult } from "@/lib/supabase-app-data";
+import type { SupabaseConnectionResult, SupabaseSaveResult, SupabaseSnapshotInfo, SupabaseTestResult } from "@/lib/supabase-app-data";
 import { getSupabaseAuthSession, supabaseAuth } from "@/lib/supabase-auth";
 import type { SupabaseAuthSession } from "@/lib/supabase-auth";
 import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
@@ -619,6 +619,13 @@ export default function Home() {
   }
 
   const updateData = (next: AppData) => setData(next);
+  const saveOperationalData = async () => {
+    const result = await saveAppDataToSupabase(data);
+    lastSupabaseSaveRef.current = cloudSaveFingerprint(result.data);
+    failedSupabaseSaveRef.current = "";
+    setData(result.data);
+    return result;
+  };
   const permittedMenus = menus.filter((menu) => canAccessMenu(data, menu.key));
 
   const changeRole = (role: UserRole) => {
@@ -738,7 +745,7 @@ export default function Home() {
           {view === "receivables" && <ReceivablesView data={data} updateData={updateData} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />}
           {view === "journal" && <WorkerJournalView data={data} />}
           {view === "rules" && <RulesView data={data} updateData={updateData} />}
-          {view === "settings" && <SettingsView data={data} updateData={updateData} authSession={authSession} />}
+          {view === "settings" && <SettingsView data={data} updateData={updateData} authSession={authSession} onSaveOperationalData={saveOperationalData} />}
           {view === "checklist" && <OperationChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "productionTest" && <ProductionTestChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "help" && <HelpView />}
@@ -2693,15 +2700,18 @@ function WorkerJournalView({ data }: { data: AppData }) {
 function SettingsView({
   data,
   updateData,
-  authSession
+  authSession,
+  onSaveOperationalData
 }: {
   data: AppData;
   updateData: (data: AppData) => void;
   authSession: SupabaseAuthSession;
+  onSaveOperationalData: () => Promise<SupabaseSaveResult>;
 }) {
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseConnectionResult | null>(null);
   const [snapshotInfo, setSnapshotInfo] = useState<SupabaseSnapshotInfo | null>(null);
   const [testResult, setTestResult] = useState<SupabaseTestResult | null>(null);
+  const [operationalSaveResult, setOperationalSaveResult] = useState<SupabaseSaveResult | null>(null);
   const [cloudAction, setCloudAction] = useState<"idle" | "checking" | "saving" | "loading">("idle");
 
   const updateCompanyInfo = (key: keyof AppData["companyInfo"], value: string) => {
@@ -2790,6 +2800,35 @@ function SettingsView({
       alert(`Supabase 테스트 저장 확인 완료\n첫 요청: ${firstStep?.method || result.uploadMethod}\nRequest URL: ${result.requestUrl}\nupsert: ${result.uploadUpsert ? "true" : "false"}\n경로: ${result.testPath}\n운영 current.json은 읽거나 쓰지 않았습니다.`);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Supabase 테스트 저장 확인 중 오류가 발생했습니다.");
+    } finally {
+      setCloudAction("idle");
+    }
+  };
+
+  const runOperationalCurrentSave = async () => {
+    if (!confirm("현재 업무 데이터를 Supabase 운영 current.json에 저장합니다.\n기존 current.json이 있으면 먼저 snapshots에 백업한 뒤 갱신합니다.\n계속할까요?")) return;
+    setCloudAction("saving");
+    try {
+      const result = await onSaveOperationalData();
+      setOperationalSaveResult(result);
+      setSnapshotInfo({
+        configured: true,
+        snapshotFound: true,
+        revision: result.revision,
+        exportedAt: result.savedAt,
+        appDataPath: result.path,
+        checkedAt: result.savedAt,
+        message: result.snapshotPath ? "current.json 저장 및 snapshot 백업이 완료되었습니다." : "current.json 최초 저장이 완료되었습니다."
+      });
+      alert(
+        `운영 current.json 저장 완료\n` +
+          `current: ${result.path}\n` +
+          `Request URL: ${result.currentRequestUrl}\n` +
+          `revision: ${result.revision}\n` +
+          `${result.snapshotPath ? `snapshot: ${result.snapshotPath}\n` : "snapshot: 최초 저장이라 생성하지 않음\n"}`
+      );
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "운영 current.json 저장 중 오류가 발생했습니다.");
     } finally {
       setCloudAction("idle");
     }
@@ -2897,6 +2936,7 @@ function SettingsView({
           <>
             <Button variant="secondary" onClick={runSupabaseCheck} disabled={cloudAction !== "idle"}>연결 확인</Button>
             <Button variant="secondary" onClick={refreshCloudSnapshotInfo} disabled={cloudAction !== "idle" || !canUseOperationalCloudData}>클라우드 상태 새로고침</Button>
+            <Button onClick={runOperationalCurrentSave} disabled={cloudAction !== "idle" || !canUseOperationalCloudData}>운영 current.json 저장</Button>
             <Button onClick={runSupabaseStorageTest} disabled={cloudAction !== "idle" || !canRunSupabaseStorageTest}>테스트 저장 확인</Button>
             <Button variant="secondary" onClick={loadLatestCloudData} disabled={cloudAction !== "idle" || !canUseOperationalCloudData}>클라우드 최신 데이터 불러오기</Button>
           </>
@@ -2935,6 +2975,10 @@ function SettingsView({
           <p className="mt-1"><b>테스트 파일</b>: {testResult?.testPath || "connection-test/test.json"}</p>
           <p className="mt-1 break-all"><b>테스트 Request URL</b>: {testResult?.requestUrl || "-"}</p>
           <p className="mt-1"><b>테스트 첫 요청</b>: {testResult?.steps[0]?.method || "-"} / upsert: {testResult ? String(testResult.uploadUpsert) : "-"}</p>
+          <p className="mt-3"><b>운영 current.json</b>: {operationalSaveResult?.path || "local-org/current.json"}</p>
+          <p className="mt-1 break-all"><b>운영 Request URL</b>: {operationalSaveResult?.currentRequestUrl || "-"}</p>
+          <p className="mt-1"><b>운영 저장 revision</b>: {operationalSaveResult?.revision ?? "-"}</p>
+          <p className="mt-1 break-all"><b>최근 snapshot</b>: {operationalSaveResult?.snapshotPath || "최초 저장 전 또는 최초 저장 시 없음"}</p>
         </div>
         {supabaseDiagnostics && (
           <div className="mt-3 grid grid-cols-1 gap-3 text-sm lg:grid-cols-2">

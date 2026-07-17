@@ -313,6 +313,55 @@ function LoginScreen({ onLogin, action, error }: { onLogin: () => void; action: 
   );
 }
 
+function SidebarAccount({
+  authSession,
+  authAction,
+  onLogout
+}: {
+  authSession: SupabaseAuthSession;
+  authAction: AuthAction;
+  onLogout: () => void;
+}) {
+  const profileName = authSession.user.name || "Google 사용자";
+  const email = authSession.user.email || "-";
+  return (
+    <div className="hidden border-t border-white/10 pt-4 lg:mt-auto lg:block">
+      <div className="rounded-md border border-white/10 bg-white/5 p-3">
+        <p className="truncate text-sm font-bold text-white">{profileName}</p>
+        <p className="mt-1 truncate text-xs text-navy-100">{email}</p>
+        <Button
+          variant="secondary"
+          onClick={onLogout}
+          disabled={authAction === "signing-out"}
+          className="mt-3 w-full border-white/15 bg-mint-500 text-navy-950 hover:bg-mint-400"
+        >
+          {authAction === "signing-out" ? "로그아웃 중" : "로그아웃"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function MobileHeaderAccount({
+  authSession,
+  authAction,
+  onLogout
+}: {
+  authSession: SupabaseAuthSession;
+  authAction: AuthAction;
+  onLogout: () => void;
+}) {
+  const profileName = authSession.user.name || "Google 사용자";
+  return (
+    <div className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md bg-navy-50 px-3 py-2 lg:hidden">
+      <p className="min-w-0 truncate text-sm font-bold text-navy-900">{profileName}</p>
+      <Button variant="secondary" onClick={onLogout} disabled={authAction === "signing-out"} className="min-h-9 shrink-0 px-3 py-1 text-xs">
+        {authAction === "signing-out" ? "로그아웃 중" : "로그아웃"}
+      </Button>
+    </div>
+  );
+}
+
 export default function Home() {
   const [data, setData] = useState<AppData | null>(null);
   const [authSession, setAuthSession] = useState<SupabaseAuthSession | null>(null);
@@ -568,12 +617,12 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen flex-col bg-navy-50 lg:flex-row">
-      <aside className="w-full shrink-0 bg-navy-900 p-4 text-white lg:w-64 lg:p-5">
+      <aside className="flex w-full shrink-0 flex-col bg-navy-900 p-4 text-white lg:sticky lg:top-0 lg:h-screen lg:w-64 lg:p-5">
         <div className="mb-4 lg:mb-8">
           <p className="text-xs font-semibold text-mint-100">내부 업무용 MVP</p>
           <h1 className="mt-2 text-xl font-bold leading-tight">출역·노임 정산 도우미</h1>
         </div>
-        <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-1">
+        <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex-1 lg:grid-cols-1 lg:content-start lg:overflow-y-auto">
           {permittedMenus.map((menu) => (
             <button
               key={menu.key}
@@ -586,15 +635,17 @@ export default function Home() {
             </button>
           ))}
         </nav>
+        <SidebarAccount authSession={authSession} authAction={authAction} onLogout={handleLogout} />
       </aside>
 
       <section className="min-w-0 flex-1">
-        <header className="flex flex-col gap-3 border-b border-navy-100 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between lg:h-20 lg:px-8 lg:py-0">
+        <header className="sticky top-0 z-20 flex flex-col gap-3 border-b border-navy-100 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between lg:static lg:h-20 lg:px-8 lg:py-0">
           <div>
             <p className="text-sm font-semibold text-slate-500">현재 월 · {roleLabels[data.accessControl?.currentRole || "ADMIN"]}</p>
             <p className="text-xl font-bold text-navy-900">{selectedMonth}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <MobileHeaderAccount authSession={authSession} authAction={authAction} onLogout={handleLogout} />
             <SelectInput value={data.accessControl?.currentRole || "ADMIN"} onChange={(event) => changeRole(event.target.value as UserRole)} className="w-32">
               <option value="ADMIN">관리자</option>
               <option value="USER">일반사용자</option>
@@ -635,7 +686,7 @@ export default function Home() {
           {view === "receivables" && <ReceivablesView data={data} updateData={updateData} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />}
           {view === "journal" && <WorkerJournalView data={data} />}
           {view === "rules" && <RulesView data={data} updateData={updateData} />}
-          {view === "settings" && <SettingsView data={data} updateData={updateData} authSession={authSession} authAction={authAction} onLogout={handleLogout} />}
+          {view === "settings" && <SettingsView data={data} updateData={updateData} authSession={authSession} />}
           {view === "checklist" && <OperationChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "productionTest" && <ProductionTestChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "help" && <HelpView />}
@@ -2590,15 +2641,11 @@ function WorkerJournalView({ data }: { data: AppData }) {
 function SettingsView({
   data,
   updateData,
-  authSession,
-  authAction,
-  onLogout
+  authSession
 }: {
   data: AppData;
   updateData: (data: AppData) => void;
   authSession: SupabaseAuthSession;
-  authAction: AuthAction;
-  onLogout: () => void;
 }) {
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseConnectionResult | null>(null);
   const [snapshotInfo, setSnapshotInfo] = useState<SupabaseSnapshotInfo | null>(null);
@@ -2779,14 +2826,7 @@ function SettingsView({
 
   return (
     <div className="space-y-5">
-      <Panel
-        title="로그인 계정"
-        actions={
-          <Button variant="secondary" onClick={onLogout} disabled={authAction === "signing-out"}>
-            {authAction === "signing-out" ? "로그아웃 중" : "로그아웃"}
-          </Button>
-        }
-      >
+      <Panel title="로그인 계정">
         <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-md border border-navy-100 bg-navy-50 p-3">
             <p className="text-xs font-semibold text-slate-500">로그인 이메일</p>

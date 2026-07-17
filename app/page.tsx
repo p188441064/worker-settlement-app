@@ -14,6 +14,8 @@ import {
   testSupabaseStorageConnection
 } from "@/lib/supabase-app-data";
 import type { SupabaseConnectionResult, SupabaseSnapshotInfo, SupabaseTestResult } from "@/lib/supabase-app-data";
+import { getSupabaseAuthSession, supabaseAuth } from "@/lib/supabase-auth";
+import type { SupabaseAuthSession } from "@/lib/supabase-auth";
 import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
@@ -267,8 +269,56 @@ function downloadAppDataBackup(data: AppData, label = "백업") {
   URL.revokeObjectURL(url);
 }
 
+type AuthAction = "idle" | "signing-in" | "signing-out";
+
+function AuthLoadingScreen() {
+  return (
+    <main className="grid min-h-screen place-items-center bg-navy-50 px-4 text-navy-900">
+      <div className="rounded-md border border-navy-100 bg-white px-5 py-4 text-sm font-semibold shadow-ledger">
+        로그인 상태를 확인하고 있습니다.
+      </div>
+    </main>
+  );
+}
+
+function LoginScreen({ onLogin, action, error }: { onLogin: () => void; action: AuthAction; error: string }) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-navy-50 px-4 py-8 text-navy-900 sm:py-12">
+      <section className="w-full max-w-[420px] rounded-md border border-navy-100 bg-white p-6 shadow-ledger sm:p-8">
+        <div className="flex items-center gap-3">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-navy-900 text-sm font-bold text-white">정</div>
+          <p className="text-lg font-bold text-navy-900">인력·노임 정산 도우미</p>
+        </div>
+
+        <div className="mt-8 space-y-4">
+          <h1 className="text-2xl font-bold leading-snug text-navy-900 sm:text-[26px]">여러 기기에서 같은 업무 자료를 안전하게 관리하세요.</h1>
+          <p className="text-sm leading-6 text-slate-600">
+            Google 계정으로 로그인하면 정산 자료와 첨부 파일을 같은 계정 기준으로 안전하게 연결할 수 있습니다.
+          </p>
+        </div>
+
+        <Button onClick={onLogin} disabled={action !== "idle"} className="mt-8 w-full bg-mint-600 text-white hover:bg-mint-700">
+          {action === "signing-in" ? "Google 로그인으로 이동 중" : action === "signing-out" ? "로그아웃 중" : "Google로 로그인"}
+        </Button>
+
+        {error && <p className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</p>}
+
+        <div className="mt-7 border-t border-navy-100 pt-5">
+          <p className="text-sm leading-6 text-slate-600">
+            실제 근로자 개인정보를 안전하게 관리해야 합니다. 공용 기기에서는 사용 후 반드시 로그아웃하세요.
+          </p>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export default function Home() {
   const [data, setData] = useState<AppData | null>(null);
+  const [authSession, setAuthSession] = useState<SupabaseAuthSession | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authAction, setAuthAction] = useState<AuthAction>("idle");
+  const [authError, setAuthError] = useState("");
   const [view, setView] = useState<ViewKey>("dashboard");
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [hydrated, setHydrated] = useState(false);
@@ -278,13 +328,38 @@ export default function Home() {
   const cloudRevisionCheckedRef = useRef(false);
 
   useEffect(() => {
-    setData(loadAppData());
-    setHydrated(true);
+    getSupabaseAuthSession()
+      .then((session) => {
+        setAuthSession(session || null);
+        setAuthError("");
+      })
+      .catch((error) => {
+        setAuthError(error instanceof Error ? error.message : "로그인 상태 확인 중 오류가 발생했습니다.");
+        setAuthSession(null);
+      })
+      .finally(() => setAuthChecked(true));
   }, []);
 
   useEffect(() => {
-    if (data && hydrated) saveAppData(data);
-  }, [data, hydrated]);
+    if (!authChecked || !authSession || hydrated) return;
+    setData(loadAppData());
+    setHydrated(true);
+  }, [authChecked, authSession, hydrated]);
+
+  useEffect(() => {
+    if (authSession && data && hydrated) saveAppData(data);
+  }, [authSession, data, hydrated]);
+
+  useEffect(() => {
+    if (!authSession) return;
+    const refreshDelay = Math.max(authSession.expiresAt - Date.now() - 60 * 1000, 5000);
+    const timer = window.setTimeout(() => {
+      getSupabaseAuthSession()
+        .then((session) => setAuthSession(session || null))
+        .catch(() => setAuthSession(null));
+    }, refreshDelay);
+    return () => window.clearTimeout(timer);
+  }, [authSession]);
 
   useEffect(() => {
     if (!OPERATIONAL_SUPABASE_APP_DATA_ENABLED) return;
@@ -408,6 +483,36 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [data]);
 
+  const handleGoogleLogin = async () => {
+    setAuthAction("signing-in");
+    setAuthError("");
+    const result = await supabaseAuth.signInWithOAuth({ provider: "google" });
+    if (result.error) {
+      setAuthError(result.error.message);
+      setAuthAction("idle");
+    }
+  };
+
+  const handleLogout = async () => {
+    setAuthAction("signing-out");
+    setAuthError("");
+    const sessionToClose = authSession;
+    setAuthSession(null);
+    setData(null);
+    setHydrated(false);
+    setView("dashboard");
+    await supabaseAuth.signOut(sessionToClose);
+    setAuthAction("idle");
+  };
+
+  if (!authChecked) {
+    return <AuthLoadingScreen />;
+  }
+
+  if (!authSession) {
+    return <LoginScreen onLogin={handleGoogleLogin} action={authAction} error={authError} />;
+  }
+
   if (!data) {
     return <main className="grid min-h-screen place-items-center bg-navy-50 text-navy-900">앱 데이터를 준비하고 있습니다.</main>;
   }
@@ -530,7 +635,7 @@ export default function Home() {
           {view === "receivables" && <ReceivablesView data={data} updateData={updateData} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />}
           {view === "journal" && <WorkerJournalView data={data} />}
           {view === "rules" && <RulesView data={data} updateData={updateData} />}
-          {view === "settings" && <SettingsView data={data} updateData={updateData} />}
+          {view === "settings" && <SettingsView data={data} updateData={updateData} authSession={authSession} authAction={authAction} onLogout={handleLogout} />}
           {view === "checklist" && <OperationChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "productionTest" && <ProductionTestChecklistView data={data} selectedMonth={selectedMonth} />}
           {view === "help" && <HelpView />}
@@ -2482,7 +2587,19 @@ function WorkerJournalView({ data }: { data: AppData }) {
   );
 }
 
-function SettingsView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
+function SettingsView({
+  data,
+  updateData,
+  authSession,
+  authAction,
+  onLogout
+}: {
+  data: AppData;
+  updateData: (data: AppData) => void;
+  authSession: SupabaseAuthSession;
+  authAction: AuthAction;
+  onLogout: () => void;
+}) {
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseConnectionResult | null>(null);
   const [snapshotInfo, setSnapshotInfo] = useState<SupabaseSnapshotInfo | null>(null);
   const [testResult, setTestResult] = useState<SupabaseTestResult | null>(null);
@@ -2661,6 +2778,26 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
 
   return (
     <div className="space-y-5">
+      <Panel
+        title="로그인 계정"
+        actions={
+          <Button variant="secondary" onClick={onLogout} disabled={authAction === "signing-out"}>
+            {authAction === "signing-out" ? "로그아웃 중" : "로그아웃"}
+          </Button>
+        }
+      >
+        <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+          <div className="rounded-md border border-navy-100 bg-navy-50 p-3">
+            <p className="text-xs font-semibold text-slate-500">로그인 이메일</p>
+            <p className="mt-2 break-words font-bold text-navy-900">{authSession.user.email || "-"}</p>
+          </div>
+          <div className="rounded-md border border-navy-100 bg-navy-50 p-3">
+            <p className="text-xs font-semibold text-slate-500">Google 프로필 이름</p>
+            <p className="mt-2 break-words font-bold text-navy-900">{authSession.user.name || "-"}</p>
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-slate-500">로그아웃해도 이 브라우저의 localStorage 업무 데이터와 JSON 백업 기능은 자동 삭제되지 않습니다.</p>
+      </Panel>
       <Panel title="회사 기본정보 관리">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="업체명"><TextInput value={data.companyInfo.companyName} onChange={(event) => updateCompanyInfo("companyName", event.target.value)} /></Field>

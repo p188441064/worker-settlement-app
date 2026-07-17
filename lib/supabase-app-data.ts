@@ -12,6 +12,7 @@ import {
   downloadSupabaseStorageObject
 } from "./supabase";
 import type { SupabaseEnvironmentDiagnostics, SupabaseStorageConfig } from "./supabase";
+import { getCurrentSupabaseAccessToken } from "./supabase-auth";
 
 export const SUPABASE_CONFLICT_MESSAGE = "다른 기기에서 더 최신 데이터가 저장되었습니다.\n클라우드 데이터를 먼저 불러온 후 다시 시도하세요.";
 
@@ -190,7 +191,7 @@ async function readCurrentPayload() {
   const config = getAppDataConfig();
   if (!config) throw new Error("Supabase 환경변수가 설정되지 않았습니다.");
   const path = getSupabaseAppDataPath();
-  const blob = await downloadSupabaseStorageObject(path, config);
+  const blob = await downloadSupabaseStorageObject(path, config, getCurrentSupabaseAccessToken());
   if (!blob) return undefined;
   return {
     path,
@@ -277,7 +278,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionResul
   const environment = getSupabaseEnvironmentDiagnostics();
   const projectCheck = checkSupabaseProjectSettings(environment);
   const config = getSupabaseStorageConfig();
-  const headers = getSupabaseAuthHeaders(config);
+  const headers = getSupabaseAuthHeaders(config, getCurrentSupabaseAccessToken());
   if (!config || !headers) {
     return {
       configured: false,
@@ -378,8 +379,9 @@ export async function testSupabaseStorageConnection(): Promise<SupabaseTestResul
     checkedAt
   };
   try {
-    await uploadSupabaseStorageObject(testPath, new Blob([JSON.stringify(payload)], { type: "application/json" }), config);
-    const restored = await downloadSupabaseStorageObject(testPath, config);
+    const accessToken = getCurrentSupabaseAccessToken();
+    await uploadSupabaseStorageObject(testPath, new Blob([JSON.stringify(payload)], { type: "application/json" }), config, accessToken);
+    const restored = await downloadSupabaseStorageObject(testPath, config, accessToken);
     if (!restored) throw new Error("Supabase 테스트 파일을 다시 읽지 못했습니다.");
     const parsed = JSON.parse(await restored.text()) as Partial<typeof payload>;
     if (parsed.checkedAt !== checkedAt) throw new Error("Supabase 테스트 파일 내용이 일치하지 않습니다.");
@@ -425,12 +427,12 @@ export async function saveAppDataToSupabase(data: AppData) {
   let snapshotPath: string | undefined;
   if (current) {
     snapshotPath = getSupabaseSnapshotPath(cloudRevision, current.payload.exportedAt || savedAt);
-    await uploadSupabaseStorageObject(snapshotPath, new Blob([current.raw], { type: "application/json" }), config);
+    await uploadSupabaseStorageObject(snapshotPath, new Blob([current.raw], { type: "application/json" }), config, getCurrentSupabaseAccessToken());
   }
 
   const payload = createPayload(data, nextRevision, savedAt);
   const path = getSupabaseAppDataPath();
-  await uploadSupabaseStorageObject(path, new Blob([JSON.stringify(payload)], { type: "application/json" }), config);
+  await uploadSupabaseStorageObject(path, new Blob([JSON.stringify(payload)], { type: "application/json" }), config, getCurrentSupabaseAccessToken());
   return {
     path,
     snapshotPath,

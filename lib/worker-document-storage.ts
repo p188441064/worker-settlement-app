@@ -2,6 +2,7 @@
 
 import { Worker, WorkerAttachment, WorkerDocumentKind } from "./types";
 import { deleteSupabaseStorageObject, downloadSupabaseStorageObject, getSupabaseStorageConfig, uploadSupabaseStorageObject } from "./supabase";
+import { getCurrentSupabaseAccessToken } from "./supabase-auth";
 
 export interface UploadedWorkerDocument {
   storageProvider: "supabase";
@@ -23,7 +24,7 @@ export async function uploadWorkerDocumentFile(worker: Worker, kind: WorkerDocum
   const config = getSupabaseStorageConfig();
   if (!config) return undefined;
   const storagePath = buildWorkerDocumentStoragePath(worker, kind, fileName);
-  const uploaded = await uploadSupabaseStorageObject(storagePath, file, config);
+  const uploaded = await uploadSupabaseStorageObject(storagePath, file, config, getCurrentSupabaseAccessToken());
   if (!uploaded) return undefined;
   return {
     storageProvider: "supabase",
@@ -35,7 +36,7 @@ export async function uploadWorkerDocumentFile(worker: Worker, kind: WorkerDocum
 
 export async function downloadWorkerDocumentFile(attachment: WorkerAttachment) {
   if (attachment.storageProvider === "supabase" && attachment.storagePath) {
-    const blob = await downloadSupabaseStorageObject(attachment.storagePath);
+    const blob = await downloadSupabaseStorageObject(attachment.storagePath, undefined, getCurrentSupabaseAccessToken());
     if (blob) return blob;
   }
   return undefined;
@@ -43,5 +44,5 @@ export async function downloadWorkerDocumentFile(attachment: WorkerAttachment) {
 
 export async function deleteWorkerDocumentFile(attachment?: WorkerAttachment) {
   if (!attachment?.storagePath || attachment.storageProvider !== "supabase") return false;
-  return deleteSupabaseStorageObject(attachment.storagePath);
+  return deleteSupabaseStorageObject(attachment.storagePath, undefined, getCurrentSupabaseAccessToken());
 }

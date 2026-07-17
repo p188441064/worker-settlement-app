@@ -2565,6 +2565,18 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
     try {
       const result = await testSupabaseStorageConnection();
       setTestResult(result);
+      updateData({
+        ...data,
+        cloudSync: {
+          ...data.cloudSync,
+          mode: "SUPABASE_READY",
+          status: "SUCCESS",
+          storageProvider: "supabase",
+          attachmentProvider: "supabaseStorage",
+          lastCloudCheckedAt: result.checkedAt,
+          lastError: ""
+        }
+      });
       alert(`Supabase 테스트 저장 확인 완료\n경로: ${result.testPath}\n운영 current.json은 읽거나 쓰지 않았습니다.`);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Supabase 테스트 저장 확인 중 오류가 발생했습니다.");
@@ -2633,6 +2645,13 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
   const lastCloudCheckedLabel = snapshotInfo?.checkedAt || data.cloudSync.lastCloudCheckedAt || "-";
   const supabaseDiagnostics = supabaseStatus?.environment;
   const supabaseChecks = supabaseStatus?.checks || [];
+  const storageCheck = supabaseChecks.find((check) => check.kind === "Storage");
+  const canUseSupabaseStorage = Boolean(
+    supabaseStatus?.configured &&
+      supabaseStatus.bucketExists &&
+      supabaseDiagnostics?.urlConfigured &&
+      supabaseDiagnostics.keyConfigured
+  );
 
   return (
     <div className="space-y-5">
@@ -2652,9 +2671,9 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
         actions={
           <>
             <Button variant="secondary" onClick={runSupabaseCheck} disabled={cloudAction !== "idle"}>연결 확인</Button>
-            <Button variant="secondary" onClick={refreshCloudSnapshotInfo} disabled={cloudAction !== "idle" || !supabaseStatus?.ok}>클라우드 상태 새로고침</Button>
-            <Button onClick={runSupabaseStorageTest} disabled={cloudAction !== "idle" || !supabaseStatus?.ok}>테스트 저장 확인</Button>
-            <Button variant="secondary" onClick={loadLatestCloudData} disabled={cloudAction !== "idle" || !supabaseStatus?.ok}>클라우드 최신 데이터 불러오기</Button>
+            <Button variant="secondary" onClick={refreshCloudSnapshotInfo} disabled={cloudAction !== "idle" || !canUseSupabaseStorage}>클라우드 상태 새로고침</Button>
+            <Button onClick={runSupabaseStorageTest} disabled={cloudAction !== "idle" || !canUseSupabaseStorage}>테스트 저장 확인</Button>
+            <Button variant="secondary" onClick={loadLatestCloudData} disabled={cloudAction !== "idle" || !canUseSupabaseStorage}>클라우드 최신 데이터 불러오기</Button>
           </>
         }
       >
@@ -2668,6 +2687,7 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
               </Badge>
             </div>
             <p className="mt-2 text-slate-600">{supabaseStatus?.message || "설정 화면을 열면 Supabase 연결을 확인합니다."}</p>
+            <p className="mt-2 text-slate-600">Storage 버킷: {supabaseStatus?.bucketExists ? "존재 확인" : supabaseStatus ? "확인 필요" : "미확인"}</p>
           </div>
           <div className="rounded-md border border-navy-100 bg-white p-3">
             <p className="text-xs font-semibold text-slate-500">revision</p>
@@ -2698,6 +2718,8 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
                 <p>프로젝트 ref: <b>{supabaseDiagnostics.projectRef || "-"}</b></p>
                 <p>키 설정: <b>{supabaseDiagnostics.keyConfigured ? "예" : "아니오"}</b></p>
                 <p>키 종류: <b>{supabaseDiagnostics.keyKind}</b></p>
+                <p>버킷 존재: <b>{supabaseStatus?.bucketExists ? "예" : "아니오"}</b></p>
+                <p>Storage 상태: <b>{storageCheck?.ok ? "정상" : storageCheck ? "확인 필요" : "미확인"}</b></p>
                 <p>키 앞 6글자: <b>{supabaseDiagnostics.keyPrefix || "-"}</b></p>
                 <p>앞뒤 공백: <b>{supabaseDiagnostics.keyHasSurroundingWhitespace ? "있음" : "없음"}</b></p>
                 <p>키 길이: <b>{supabaseDiagnostics.keyLength}</b></p>
@@ -2713,11 +2735,13 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
                       <Badge tone={check.ok ? "mint" : "rose"}>{check.status ?? "요청 실패"}</Badge>
                     </div>
                     <p className="mt-1">요청: {check.requestTarget}</p>
+                    <p className="mt-1">상태: {check.ok ? (check.kind === "Storage" ? "버킷 확인됨" : "설정 확인됨") : "확인 필요"}</p>
+                    <p className="mt-1">HTTP 상태 코드: {check.status ?? "-"}</p>
                     <p className="mt-1">message: {check.message || "-"}</p>
                     <p className="mt-1">error: {check.error || "-"}</p>
                     <p className="mt-1">error_code: {check.errorCode || "-"}</p>
                   </div>
-                )) : <p>연결 확인 후 REST와 Storage 결과가 표시됩니다.</p>}
+                )) : <p>연결 확인 후 프로젝트 설정과 Storage 결과가 표시됩니다.</p>}
               </div>
             </div>
           </div>
@@ -2726,7 +2750,7 @@ function SettingsView({ data, updateData }: { data: AppData; updateData: (data: 
           <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">
             <p className="whitespace-pre-line">{data.cloudSync.conflictMessage || SUPABASE_CONFLICT_MESSAGE}</p>
             <div className="mt-3">
-              <Button variant="secondary" onClick={loadLatestCloudData} disabled={cloudAction !== "idle" || !supabaseStatus?.ok}>클라우드 최신 데이터 불러오기</Button>
+              <Button variant="secondary" onClick={loadLatestCloudData} disabled={cloudAction !== "idle" || !canUseSupabaseStorage}>클라우드 최신 데이터 불러오기</Button>
             </div>
           </div>
         )}

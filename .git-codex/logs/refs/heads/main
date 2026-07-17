@@ -2,3 +2,4 @@
 3b4690f90964cfa16cf91aba9f44e545ccea91f9 fc45de9399316155701d5b60212ba76c08f0e75c p188441064 <p188441064@gmail.com> 1784287341 +0900	commit: Add Supabase AppData sync safeguards
 fc45de9399316155701d5b60212ba76c08f0e75c 5e5ceff78bedc5feb7e93745e8dd04d8e5aea343 p188441064 <p188441064@gmail.com> 1784288566 +0900	commit: Fix Supabase authentication and add sync safeguards
 5e5ceff78bedc5feb7e93745e8dd04d8e5aea343 bc8c50bbf5812202886f47aa828a963dc28e34e9 p188441064 <p188441064@gmail.com> 1784296135 +0900	commit: Improve Supabase connection diagnostics
+bc8c50bbf5812202886f47aa828a963dc28e34e9 53d1e57a8c8d75e3bf2bc6995d350342465d1a8c p188441064 <p188441064@gmail.com> 1784299383 +0900	commit: Fix Supabase storage connection gating

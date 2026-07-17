@@ -18,6 +18,7 @@ export const SUPABASE_CONFLICT_MESSAGE = "다른 기기에서 더 최신 데이�
 export interface SupabaseConnectionResult {
   configured: boolean;
   ok: boolean;
+  bucketExists: boolean;
   message: string;
   checkedAt: string;
   environment: SupabaseEnvironmentDiagnostics;
@@ -25,7 +26,7 @@ export interface SupabaseConnectionResult {
 }
 
 export interface SupabaseConnectionCheck {
-  kind: "REST" | "Storage";
+  kind: "Project" | "Storage";
   ok: boolean;
   status: number | null;
   requestTarget: string;
@@ -244,35 +245,54 @@ async function checkSupabaseEndpoint(kind: SupabaseConnectionCheck["kind"], requ
   }
 }
 
+function checkSupabaseProjectSettings(environment: SupabaseEnvironmentDiagnostics): SupabaseConnectionCheck {
+  const ok = environment.urlConfigured && environment.keyConfigured && Boolean(environment.projectRef);
+  return {
+    kind: "Project",
+    ok,
+    status: null,
+    requestTarget: "Supabase project URL and publishable key",
+    message: ok ? "프로젝트 URL과 API 키 설정을 확인했습니다." : "Supabase URL 또는 API 키 설정을 확인해야 합니다.",
+    error: "",
+    errorCode: ""
+  };
+}
+
 export async function checkSupabaseConnection(): Promise<SupabaseConnectionResult> {
   const checkedAt = new Date().toISOString();
   const environment = getSupabaseEnvironmentDiagnostics();
+  const projectCheck = checkSupabaseProjectSettings(environment);
   const config = getSupabaseStorageConfig();
   const headers = getSupabaseAuthHeaders(config);
   if (!config || !headers) {
     return {
       configured: false,
       ok: false,
+      bucketExists: false,
       checkedAt,
       message: "Supabase URL 또는 publishable key가 설정되지 않았습니다.",
       environment,
-      checks: []
+      checks: [projectCheck]
     };
   }
 
-  const checks = await Promise.all([
-    checkSupabaseEndpoint("REST", "REST /rest/v1/", `${config.url}/rest/v1/`, headers),
-    checkSupabaseEndpoint("Storage", "Storage /storage/v1/bucket/{bucket}", `${config.url}/storage/v1/bucket/${encodeURIComponent(config.bucket)}`, headers)
-  ]);
-  const failedChecks = checks.filter((check) => !check.ok);
+  const storageCheck = await checkSupabaseEndpoint(
+    "Storage",
+    "Storage /storage/v1/bucket/{bucket}",
+    `${config.url}/storage/v1/bucket/${encodeURIComponent(config.bucket)}`,
+    headers
+  );
+  const bucketExists = storageCheck.ok;
+  const checks = [projectCheck, storageCheck];
 
   return {
     configured: true,
-    ok: failedChecks.length === 0,
+    ok: projectCheck.ok && bucketExists,
+    bucketExists,
     checkedAt,
-    message: failedChecks.length
-      ? `Supabase 연결 확인 실패: ${failedChecks.map((check) => `${check.kind} ${check.status ?? "요청 실패"}`).join(" / ")}`
-      : "Supabase REST와 Storage 연결이 확인되었습니다.",
+    message: bucketExists
+      ? "Supabase Storage 버킷 접근이 확인되었습니다."
+      : `worker-documents 버킷 접근 확인 실패: HTTP ${storageCheck.status ?? "요청 실패"}`,
     environment,
     checks
   };

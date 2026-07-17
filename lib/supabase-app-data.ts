@@ -18,7 +18,8 @@ export const SUPABASE_CONFLICT_MESSAGE = "다른 기기에서 더 최신 데이�
 export interface SupabaseConnectionResult {
   configured: boolean;
   ok: boolean;
-  bucketExists: boolean;
+  storageApiReachable: boolean;
+  bucketCheckMessage: string;
   message: string;
   checkedAt: string;
   environment: SupabaseEnvironmentDiagnostics;
@@ -245,6 +246,19 @@ async function checkSupabaseEndpoint(kind: SupabaseConnectionCheck["kind"], requ
   }
 }
 
+function markHttpResponseAsStorageReachable(check: SupabaseConnectionCheck): SupabaseConnectionCheck {
+  if (check.status === null) return check;
+  const maybeBucketHiddenByPolicy = `${check.message} ${check.error} ${check.errorCode}`.toLowerCase().includes("bucket not found");
+  return {
+    ...check,
+    ok: true,
+    message: maybeBucketHiddenByPolicy
+      ? "Storage API가 응답했습니다. 버킷 존재 여부는 권한 설정 전이라 판단하지 않습니다."
+      : check.message || "Storage API가 응답했습니다.",
+    error: maybeBucketHiddenByPolicy ? "" : check.error
+  };
+}
+
 function checkSupabaseProjectSettings(environment: SupabaseEnvironmentDiagnostics): SupabaseConnectionCheck {
   const ok = environment.urlConfigured && environment.keyConfigured && Boolean(environment.projectRef);
   return {
@@ -268,7 +282,8 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionResul
     return {
       configured: false,
       ok: false,
-      bucketExists: false,
+      storageApiReachable: false,
+      bucketCheckMessage: "로그인과 Storage 정책 설정 전이라 버킷 존재 여부는 확인하지 않습니다.",
       checkedAt,
       message: "Supabase URL 또는 publishable key가 설정되지 않았습니다.",
       environment,
@@ -276,26 +291,41 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionResul
     };
   }
 
-  const storageCheck = await checkSupabaseEndpoint(
+  const rawStorageCheck = await checkSupabaseEndpoint(
     "Storage",
-    "Storage /storage/v1/bucket/{bucket}",
-    `${config.url}/storage/v1/bucket/${encodeURIComponent(config.bucket)}`,
+    "Storage /storage/v1/object/{bucket}/connection-test/test.json",
+    `${config.url}/storage/v1/object/${encodeURIComponent(config.bucket)}/connection-test/test.json`,
     headers
   );
-  const bucketExists = storageCheck.ok;
+  const storageCheck = markHttpResponseAsStorageReachable(rawStorageCheck);
+  const storageApiReachable = storageCheck.status !== null;
   const checks = [projectCheck, storageCheck];
 
   return {
     configured: true,
-    ok: projectCheck.ok && bucketExists,
-    bucketExists,
+    ok: projectCheck.ok && storageApiReachable,
+    storageApiReachable,
+    bucketCheckMessage: "로그인과 Storage 정책 설정 전이라 버킷 존재 여부는 확인하지 않습니다.",
     checkedAt,
-    message: bucketExists
-      ? "Supabase Storage 버킷 접근이 확인되었습니다."
-      : `worker-documents 버킷 접근 확인 실패: HTTP ${storageCheck.status ?? "요청 실패"}`,
+    message: storageApiReachable
+      ? "Supabase 프로젝트 설정과 Storage API 응답을 확인했습니다."
+      : "Storage API 응답을 확인하지 못했습니다.",
     environment,
     checks
   };
+}
+
+function isStoragePolicyFailure(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("403") ||
+    message.includes("row-level security") ||
+    message.includes("rls") ||
+    message.includes("policy") ||
+    message.includes("not authorized") ||
+    message.includes("unauthorized")
+  );
 }
 
 export async function getSupabaseSnapshotInfo(): Promise<SupabaseSnapshotInfo> {
@@ -347,11 +377,16 @@ export async function testSupabaseStorageConnection(): Promise<SupabaseTestResul
     type: "connection-test",
     checkedAt
   };
-  await uploadSupabaseStorageObject(testPath, new Blob([JSON.stringify(payload)], { type: "application/json" }), config);
-  const restored = await downloadSupabaseStorageObject(testPath, config);
-  if (!restored) throw new Error("Supabase 테스트 파일을 다시 읽지 못했습니다.");
-  const parsed = JSON.parse(await restored.text()) as Partial<typeof payload>;
-  if (parsed.checkedAt !== checkedAt) throw new Error("Supabase 테스트 파일 내용이 일치하지 않습니다.");
+  try {
+    await uploadSupabaseStorageObject(testPath, new Blob([JSON.stringify(payload)], { type: "application/json" }), config);
+    const restored = await downloadSupabaseStorageObject(testPath, config);
+    if (!restored) throw new Error("Supabase 테스트 파일을 다시 읽지 못했습니다.");
+    const parsed = JSON.parse(await restored.text()) as Partial<typeof payload>;
+    if (parsed.checkedAt !== checkedAt) throw new Error("Supabase 테스트 파일 내용이 일치하지 않습니다.");
+  } catch (error) {
+    if (isStoragePolicyFailure(error)) throw new Error("Storage 접근 정책이 아직 설정되지 않았습니다.");
+    throw error;
+  }
   return {
     ok: true,
     checkedAt,

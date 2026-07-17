@@ -79,6 +79,24 @@ export function buildSupabasePublicUrl(path: string, config = getSupabaseStorage
   return `${config.url}/storage/v1/object/public/${config.bucket}/${encodeURI(path)}`;
 }
 
+function stringFromUnknown(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+async function createSupabaseStorageError(action: string, response: Response) {
+  let detail = "";
+  try {
+    const text = await response.text();
+    if (text) {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      detail = stringFromUnknown(parsed.message) || stringFromUnknown(parsed.error) || stringFromUnknown(parsed.code);
+    }
+  } catch {
+    detail = "";
+  }
+  return new Error(`Supabase ${action} failed: ${response.status}${detail ? ` ${detail}` : ""}`);
+}
+
 export async function uploadSupabaseStorageObject(path: string, file: Blob, config = getSupabaseStorageConfig(), accessToken?: string) {
   if (!config) return undefined;
   const authHeaders = getSupabaseAuthHeaders(config, accessToken);
@@ -92,7 +110,7 @@ export async function uploadSupabaseStorageObject(path: string, file: Blob, conf
     },
     body: file
   });
-  if (!response.ok) throw new Error(`Supabase upload failed: ${response.status}`);
+  if (!response.ok) throw await createSupabaseStorageError("upload", response);
   return {
     bucket: config.bucket,
     path,
@@ -108,7 +126,7 @@ export async function downloadSupabaseStorageObject(path: string, config = getSu
     headers: authHeaders
   });
   if (response.status === 404) return undefined;
-  if (!response.ok) throw new Error(`Supabase download failed: ${response.status}`);
+  if (!response.ok) throw await createSupabaseStorageError("download", response);
   return response.blob();
 }
 
@@ -124,7 +142,7 @@ export async function deleteSupabaseStorageObject(path: string, config = getSupa
     },
     body: JSON.stringify({ prefixes: [path] })
   });
-  if (!response.ok) throw new Error(`Supabase delete failed: ${response.status}`);
+  if (!response.ok) throw await createSupabaseStorageError("delete", response);
   return true;
 }
 

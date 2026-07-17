@@ -56,7 +56,7 @@ export function getCloudSyncPlan(config: CloudSyncConfig = createDefaultCloudSyn
     canReadCloud: canUseCloud,
     canWriteCloud: canUseCloud && mode === "SUPABASE_ACTIVE",
     shouldUseSupabaseStorage: Boolean(appConfig?.workerDocumentsBucket) && config.attachmentProvider === "supabaseStorage",
-    reason: canUseCloud ? "Supabase configuration is available." : "Using localStorage until Supabase URL, anon key, and mode are configured."
+    reason: canUseCloud ? "Supabase configuration is available." : "Using localStorage until Supabase URL, publishable key, and mode are configured."
   };
 }
 

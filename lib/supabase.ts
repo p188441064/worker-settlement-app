@@ -5,17 +5,17 @@ export const APP_DATA_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_APP_DATA_BUCKET 
 
 export interface SupabaseStorageConfig {
   url: string;
-  anonKey: string;
+  publishableKey: string;
   bucket: string;
 }
 
 export function getSupabaseStorageConfig(): SupabaseStorageConfig | undefined {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return undefined;
+  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !publishableKey) return undefined;
   return {
     url: url.replace(/\/$/, ""),
-    anonKey,
+    publishableKey,
     bucket: WORKER_DOCUMENTS_BUCKET
   };
 }
@@ -29,13 +29,14 @@ export function buildSupabasePublicUrl(path: string, config = getSupabaseStorage
   return `${config.url}/storage/v1/object/public/${config.bucket}/${encodeURI(path)}`;
 }
 
-export async function uploadSupabaseStorageObject(path: string, file: Blob, config = getSupabaseStorageConfig()) {
+export async function uploadSupabaseStorageObject(path: string, file: Blob, config = getSupabaseStorageConfig(), accessToken?: string) {
   if (!config) return undefined;
+  const authHeaders = getSupabaseAuthHeaders(config, accessToken);
+  if (!authHeaders) return undefined;
   const response = await fetch(`${config.url}/storage/v1/object/${config.bucket}/${encodeURI(path)}`, {
     method: "POST",
     headers: {
-      apikey: config.anonKey,
-      Authorization: `Bearer ${config.anonKey}`,
+      ...authHeaders,
       "Content-Type": file.type || "application/octet-stream",
       "x-upsert": "true"
     },
@@ -49,26 +50,26 @@ export async function uploadSupabaseStorageObject(path: string, file: Blob, conf
   };
 }
 
-export async function downloadSupabaseStorageObject(path: string, config = getSupabaseStorageConfig()) {
+export async function downloadSupabaseStorageObject(path: string, config = getSupabaseStorageConfig(), accessToken?: string) {
   if (!config) return undefined;
+  const authHeaders = getSupabaseAuthHeaders(config, accessToken);
+  if (!authHeaders) return undefined;
   const response = await fetch(`${config.url}/storage/v1/object/${config.bucket}/${encodeURI(path)}`, {
-    headers: {
-      apikey: config.anonKey,
-      Authorization: `Bearer ${config.anonKey}`
-    }
+    headers: authHeaders
   });
   if (response.status === 404) return undefined;
   if (!response.ok) throw new Error(`Supabase download failed: ${response.status}`);
   return response.blob();
 }
 
-export async function deleteSupabaseStorageObject(path: string, config = getSupabaseStorageConfig()) {
+export async function deleteSupabaseStorageObject(path: string, config = getSupabaseStorageConfig(), accessToken?: string) {
   if (!config) return false;
+  const authHeaders = getSupabaseAuthHeaders(config, accessToken);
+  if (!authHeaders) return false;
   const response = await fetch(`${config.url}/storage/v1/object/${config.bucket}`, {
     method: "DELETE",
     headers: {
-      apikey: config.anonKey,
-      Authorization: `Bearer ${config.anonKey}`,
+      ...authHeaders,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({ prefixes: [path] })
@@ -100,10 +101,11 @@ export function isSupabaseConfigured() {
   return Boolean(getSupabaseAppConfig());
 }
 
-export function getSupabaseAuthHeaders(config = getSupabaseStorageConfig()) {
+export function getSupabaseAuthHeaders(config = getSupabaseStorageConfig(), accessToken?: string) {
   if (!config) return undefined;
-  return {
-    apikey: config.anonKey,
-    Authorization: `Bearer ${config.anonKey}`
+  const headers: Record<string, string> = {
+    apikey: config.publishableKey
   };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  return headers;
 }

@@ -67,6 +67,48 @@ function getTodayDateKey() {
 const today = getTodayDateKey();
 const currentMonth = monthKey(new Date());
 
+function compareKoreanDisplayName(nameA: string | undefined, nameB: string | undefined, fallbackA = "", fallbackB = "") {
+  const left = (nameA || "").trim();
+  const right = (nameB || "").trim();
+  if (!left && !right) {
+    return (fallbackA || "").trim().localeCompare((fallbackB || "").trim(), "ko", {
+      sensitivity: "base",
+      numeric: true
+    });
+  }
+  if (!left) return 1;
+  if (!right) return -1;
+  const compared = left.localeCompare(right, "ko", {
+    sensitivity: "base",
+    numeric: true
+  });
+  if (compared !== 0) return compared;
+  return (fallbackA || "").trim().localeCompare((fallbackB || "").trim(), "ko", {
+    sensitivity: "base",
+    numeric: true
+  });
+}
+
+function sortWorkersForDisplay<T extends Pick<Worker, "name" | "workerCode">>(workers: T[]) {
+  return [...workers].sort((a, b) => compareKoreanDisplayName(a.name, b.name, a.workerCode, b.workerCode));
+}
+
+function sortClientsForDisplay<T extends Pick<Client, "name" | "id">>(clients: T[]) {
+  return [...clients].sort((a, b) => compareKoreanDisplayName(a.name, b.name, a.id, b.id));
+}
+
+function getSiteSortName(site: Pick<Site, "siteName" | "name">) {
+  return site.siteName || site.name;
+}
+
+function getSiteSortFallback(site: Pick<Site, "siteCode" | "code" | "id">) {
+  return site.siteCode || site.code || site.id;
+}
+
+function sortSitesForDisplay<T extends Pick<Site, "siteName" | "name" | "siteCode" | "code" | "id">>(sites: T[]) {
+  return [...sites].sort((a, b) => compareKoreanDisplayName(getSiteSortName(a), getSiteSortName(b), getSiteSortFallback(a), getSiteSortFallback(b)));
+}
+
 const emptyWorker: Worker = {
   id: "",
   workerCode: "",
@@ -1242,6 +1284,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
       return !normalizedQuery || searchable.includes(normalizedQuery);
     })
     .filter((worker) => documentFilter === "ALL" || (documentFilter === "COMPLETE" ? worker.documentStatus === "완료" : worker.documentStatus !== "완료"));
+  const sortedWorkers = sortWorkersForDisplay(workers);
   const editing = Boolean(form.id);
   const selectedWorkerSummary = form.id ? getWorkerWorkSummary(form.id, data) : undefined;
 
@@ -1413,7 +1456,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
           <table className="w-full border-collapse">
             <thead><tr><th className={th}>근로자코드</th><th className={th}>성명</th><th className={th}>생년월일</th><th className={th}>휴대폰</th><th className={th}>서류상태</th><th className={th}>총 출역일수</th><th className={th}>누적 지급액</th><th className={th}>최근 현장</th><th className={th}>최근 출역일</th><th className={th}>관리</th></tr></thead>
             <tbody>
-              {workers.map((worker) => (
+              {sortedWorkers.map((worker) => (
                 <tr key={worker.id}>
                   <td className={td}>{worker.workerCode}</td>
                   <td className={td}>{worker.name}</td>
@@ -1427,7 +1470,7 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
                   <td className={`${td} space-x-2`}><Button variant="secondary" onClick={() => editWorker(worker)}>수정</Button><Button variant="danger" onClick={() => remove(worker.id)}>삭제</Button></td>
                 </tr>
               ))}
-              {workers.length === 0 && <tr><td className={td} colSpan={10}>검색 조건에 맞는 근로자가 없습니다.</td></tr>}
+              {sortedWorkers.length === 0 && <tr><td className={td} colSpan={10}>검색 조건에 맞는 근로자가 없습니다.</td></tr>}
             </tbody>
           </table>
         </DataTable>
@@ -1437,15 +1480,16 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
   );
 }
 function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
-  const firstClient = data.clients[0] ?? emptyClient;
-  const firstSite = data.sites.find((site) => site.clientId === firstClient.id) ?? data.sites[0] ?? emptySite;
+  const sortedClients = sortClientsForDisplay(data.clients);
+  const firstClient = sortedClients[0] ?? emptyClient;
+  const firstSite = sortSitesForDisplay(data.sites.filter((site) => site.clientId === firstClient.id))[0] ?? sortSitesForDisplay(data.sites)[0] ?? emptySite;
   const [query, setQuery] = useState("");
   const [selectedClientId, setSelectedClientId] = useState(firstClient.id);
   const [selectedSiteId, setSelectedSiteId] = useState(firstSite.id);
   const [clientForm, setClientForm] = useState<Client>(firstClient.id ? firstClient : emptyClient);
   const [siteForm, setSiteForm] = useState<Site>(firstSite.id ? hydrateSite(firstSite, data.clients) : { ...emptySite, clientId: firstClient.id, clientName: firstClient.name });
 
-  const filteredClients = data.clients.filter((client) => {
+  const filteredClients = sortedClients.filter((client) => {
     const clientText = [client.name, client.managerName, client.phone, client.fax, client.email, client.email2, client.memo].join(" ").toLowerCase();
     const siteText = data.sites
       .filter((site) => site.clientId === client.id)
@@ -1458,20 +1502,22 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
 
   const treeClients = filteredClients.map((client) => ({
     client,
-    sites: data.sites
-      .filter((site) => site.clientId === client.id)
-      .filter((site) => {
+    sites: sortSitesForDisplay(
+      data.sites
+        .filter((site) => site.clientId === client.id)
+        .filter((site) => {
         const target = query.trim().toLowerCase();
         if (!target) return true;
         const item = hydrateSite(site, data.clients);
         return [item.clientName, item.siteName, item.siteCode, item.managerName, item.displayName].join(" ").toLowerCase().includes(target) || client.name.toLowerCase().includes(target);
       })
+    )
   }));
 
   const selectClient = (client: Client) => {
     setSelectedClientId(client.id);
     setClientForm({ ...emptyClient, ...client });
-    const first = data.sites.find((site) => site.clientId === client.id);
+    const first = sortSitesForDisplay(data.sites.filter((site) => site.clientId === client.id))[0];
     if (first) {
       const hydrated = hydrateSite(first, data.clients);
       setSelectedSiteId(hydrated.id);
@@ -1572,10 +1618,10 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
       assignments: data.assignments.filter((assignment) => assignment.clientId !== clientForm.id && !relatedSiteIds.includes(assignment.siteId)),
       receivablePayments: data.receivablePayments.filter((payment) => payment.clientId !== clientForm.id && !relatedSiteIds.includes(payment.siteId))
     });
-    const next = clients[0] ?? emptyClient;
+    const next = sortClientsForDisplay(clients)[0] ?? emptyClient;
     setSelectedClientId(next.id);
     setClientForm(next);
-    const nextSite = sites.find((site) => site.clientId === next.id);
+    const nextSite = sortSitesForDisplay(sites.filter((site) => site.clientId === next.id))[0];
     setSelectedSiteId(nextSite?.id ?? "");
     setSiteForm(nextSite ? hydrateSite(nextSite, clients) : createEmptySiteForClient(next));
   };
@@ -1618,7 +1664,7 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
       assignments: data.assignments.filter((assignment) => assignment.siteId !== siteForm.id),
       receivablePayments: data.receivablePayments.filter((payment) => payment.siteId !== siteForm.id)
     });
-    const next = remainingSites.find((site) => site.clientId === clientForm.id);
+    const next = sortSitesForDisplay(remainingSites.filter((site) => site.clientId === clientForm.id))[0];
     setSelectedSiteId(next?.id ?? "");
     setSiteForm(next ? hydrateSite(next, data.clients) : createEmptySiteForClient(clientForm));
   };
@@ -1722,8 +1768,10 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
   );
 }
 function AttendanceView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
-  const firstClient = data.clients[0]?.id ?? "";
-  const firstSite = data.sites.find((site) => site.clientId === firstClient)?.id ?? "";
+  const sortedClients = sortClientsForDisplay(data.clients);
+  const sortedWorkers = sortWorkersForDisplay(data.workers);
+  const firstClient = sortedClients[0]?.id ?? "";
+  const firstSite = sortSitesForDisplay(data.sites.filter((site) => site.clientId === firstClient))[0]?.id ?? "";
   const firstSiteData = data.sites.find((site) => site.id === firstSite);
   const initialWorkDate = getTodayDateKey();
   const [requestForm, setRequestForm] = useState<Omit<WorkRequest, "id" | "status">>({
@@ -1755,18 +1803,18 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
     manualReason: "",
     memo: ""
   });
-  const requestSites = data.sites.filter((site) => site.clientId === requestForm.clientId);
+  const requestSites = sortSitesForDisplay(data.sites.filter((site) => site.clientId === requestForm.clientId));
   const requests = normalizeRequestStatuses(data.workRequests, data.assignments).sort((a, b) => b.workDate.localeCompare(a.workDate));
   const selectedRequest = requests.find((request) => request.id === selectedRequestId) ?? requests[0];
   const selectedAssignments = selectedRequest ? data.assignments.filter((assignment) => assignment.requestId === selectedRequest.id && assignment.status !== "취소") : [];
   const selectedAssignedCount = selectedRequest ? getAssignedCount(selectedRequest.id, data.assignments) : 0;
   const selectedShortageCount = selectedRequest ? Math.max(selectedRequest.requestedCount - selectedAssignedCount, 0) : 0;
   const selectedAssignmentRate = selectedRequest && selectedRequest.requestedCount > 0 ? Math.round((selectedAssignedCount / selectedRequest.requestedCount) * 100) : 0;
-  const workers = data.workers.filter((worker) => [worker.name, worker.phone, worker.mobile].join(" ").includes(workerQuery));
+  const workers = sortedWorkers.filter((worker) => [worker.name, worker.phone, worker.mobile].join(" ").includes(workerQuery));
   const availableWorkers = selectedRequest
     ? workers.filter((worker) => !data.assignments.some((assignment) => assignment.requestId === selectedRequest.id && assignment.workerId === worker.id && assignment.status !== "취소"))
     : workers;
-  const previewWorker = data.workers.find((worker) => worker.id === assignmentForm.workerId) ?? data.workers[0];
+  const previewWorker = data.workers.find((worker) => worker.id === assignmentForm.workerId) ?? sortedWorkers[0];
   const previewSite = selectedRequest ? data.sites.find((site) => site.id === selectedRequest.siteId) : undefined;
   const previewClient = selectedRequest ? data.clients.find((client) => client.id === selectedRequest.clientId) : undefined;
   const preview =
@@ -1799,7 +1847,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
       : calculateByRule(assignmentForm.unitPrice, assignmentForm.workCount, assignmentForm.deductionType, data.calculationRules);
 
   const changeRequestClient = (clientId: string) => {
-    const site = data.sites.find((item) => item.clientId === clientId);
+    const site = sortSitesForDisplay(data.sites.filter((item) => item.clientId === clientId))[0];
     setRequestForm({
       ...requestForm,
       clientId,
@@ -1937,7 +1985,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
       <Panel title="요청건 등록">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <Field label="근무일"><TextInput type="date" value={requestForm.workDate} onChange={(e) => setRequestForm({ ...requestForm, workDate: e.target.value })} /></Field>
-          <Field label="거래처"><SelectInput value={requestForm.clientId} onChange={(e) => changeRequestClient(e.target.value)}>{data.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</SelectInput></Field>
+          <Field label="거래처"><SelectInput value={requestForm.clientId} onChange={(e) => changeRequestClient(e.target.value)}>{sortedClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</SelectInput></Field>
           <Field label="현장"><SelectInput value={requestForm.siteId} onChange={(e) => changeRequestSite(e.target.value)}>{requestSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</SelectInput></Field>
           <Field label="요청인원"><TextInput type="number" value={requestForm.requestedCount} onChange={(e) => setRequestForm({ ...requestForm, requestedCount: Number(e.target.value) })} /></Field>
           <Field label="단가"><TextInput type="number" value={requestForm.unitPrice} onChange={(e) => setRequestForm({ ...requestForm, unitPrice: Number(e.target.value) })} /></Field>

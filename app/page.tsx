@@ -56,12 +56,16 @@ function canAccessMenu(data: AppData, viewKey: ViewKey) {
   return role === "ADMIN" ? permission?.admin !== false : Boolean(permission?.user);
 }
 
-const today = "2026-06-19";
-const currentMonth = monthKey(new Date());
-
 function dateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
+
+function getTodayDateKey() {
+  return dateKey(new Date());
+}
+
+const today = getTodayDateKey();
+const currentMonth = monthKey(new Date());
 
 const emptyWorker: Worker = {
   id: "",
@@ -1721,9 +1725,10 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
   const firstClient = data.clients[0]?.id ?? "";
   const firstSite = data.sites.find((site) => site.clientId === firstClient)?.id ?? "";
   const firstSiteData = data.sites.find((site) => site.id === firstSite);
+  const initialWorkDate = getTodayDateKey();
   const [requestForm, setRequestForm] = useState<Omit<WorkRequest, "id" | "status">>({
-    requestDate: today,
-    workDate: today,
+    requestDate: initialWorkDate,
+    workDate: initialWorkDate,
     clientId: firstClient,
     siteId: firstSite,
     taskDescription: firstSiteData?.defaultTaskDescription || "",

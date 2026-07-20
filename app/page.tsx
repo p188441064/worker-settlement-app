@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, KeyboardEvent, ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Badge, Button, DataTable, Field, Panel, SelectInput, StatCard, TextArea, TextInput, td, th } from "@/components/ui";
 import { ageGroupLabel, calculateByRule, ceilWon, createCalculationRule, deductionTypes, getWorkerBaseAmount, formatDateDot, formatNumber, formatWon, getAgeGroupByWorkDate, getAssignedCount, getRequestStatus, isSameMonth, monthKey, normalizeRequestStatuses, withCalculatedAssignment } from "@/lib/calculations";
 import { clearAppData, exportAppData, importAppData, loadAppData, resetAppData, resetSampleData, saveAppData, createId } from "@/lib/storage";
@@ -97,8 +97,24 @@ function sortClientsForDisplay<T extends Pick<Client, "name" | "id">>(clients: T
   return [...clients].sort((a, b) => compareKoreanDisplayName(a.name, b.name, a.id, b.id));
 }
 
+function getClientDisplayName(client: Pick<Client, "name">) {
+  return client.name.trim() || "거래처명 미입력";
+}
+
 function getSiteSortName(site: Pick<Site, "siteName" | "name">) {
   return site.siteName || site.name;
+}
+
+function getSiteDisplayName(site: Pick<Site, "siteName" | "name">) {
+  return getSiteSortName(site).trim() || "현장명 미입력";
+}
+
+function normalizeTaskDescription(value: string | null | undefined) {
+  return value ?? "";
+}
+
+function displayTaskDescription(value: string | null | undefined) {
+  return normalizeTaskDescription(value).trim() || "-";
 }
 
 function getSiteSortFallback(site: Pick<Site, "siteCode" | "code" | "id">) {
@@ -1767,6 +1783,159 @@ function ClientsSitesView({ data, updateData }: { data: AppData; updateData: (da
     </div>
   );
 }
+
+type SearchableComboBoxOption = {
+  id: string;
+  label: string;
+  description?: string;
+  keywords?: string;
+};
+
+function SearchableComboBox({
+  value,
+  inputValue,
+  options,
+  placeholder,
+  emptyMessage,
+  disabled = false,
+  onInputChange,
+  onSelect
+}: {
+  value: string;
+  inputValue: string;
+  options: SearchableComboBoxOption[];
+  placeholder: string;
+  emptyMessage: string;
+  disabled?: boolean;
+  onInputChange: (value: string) => void;
+  onSelect: (id: string) => void;
+}) {
+  const listId = useId();
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const selectedOption = options.find((option) => option.id === value);
+  const selectedLabel = selectedOption?.label ?? "";
+  const query = inputValue.trim().toLowerCase();
+  const selectedQuery = selectedLabel.trim().toLowerCase();
+  const visibleOptions = useMemo(() => {
+    if (!query || query === selectedQuery) return options;
+    return options.filter((option) =>
+      [option.label, option.description, option.keywords]
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [options, query, selectedQuery]);
+  const activeOption = activeIndex >= 0 ? visibleOptions[activeIndex] : undefined;
+
+  useEffect(() => {
+    if (!open) return;
+    setActiveIndex(visibleOptions.length > 0 ? 0 : -1);
+  }, [open, visibleOptions.length]);
+
+  const resetInput = () => {
+    onInputChange(selectedLabel);
+  };
+
+  const chooseOption = (option: SearchableComboBoxOption) => {
+    onSelect(option.id);
+    onInputChange(option.label);
+    setOpen(false);
+  };
+
+  const moveActive = (direction: 1 | -1) => {
+    if (!open) setOpen(true);
+    setActiveIndex((current) => {
+      if (visibleOptions.length === 0) return -1;
+      if (current < 0) return direction === 1 ? 0 : visibleOptions.length - 1;
+      return (current + direction + visibleOptions.length) % visibleOptions.length;
+    });
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveActive(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveActive(-1);
+      return;
+    }
+    if (event.key === "Enter") {
+      if (open && activeIndex >= 0 && visibleOptions[activeIndex]) {
+        event.preventDefault();
+        chooseOption(visibleOptions[activeIndex]);
+      }
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      resetInput();
+    }
+  };
+
+  return (
+    <div className="relative min-w-0">
+      <TextInput
+        value={inputValue}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-activedescendant={open && activeOption ? `${listId}-${activeOption.id}` : undefined}
+        onFocus={(event) => {
+          event.currentTarget.select();
+          setOpen(true);
+        }}
+        onClick={() => setOpen(true)}
+        onChange={(event) => {
+          onInputChange(event.target.value);
+          setOpen(true);
+        }}
+        onKeyDown={handleKeyDown}
+        onBlur={() => {
+          setOpen(false);
+          resetInput();
+        }}
+      />
+      {open && !disabled && (
+        <div
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 z-40 mt-1 max-h-64 overflow-y-auto rounded-md border border-navy-100 bg-white py-1 text-sm shadow-lg"
+        >
+          {visibleOptions.length > 0 ? (
+            visibleOptions.map((option, index) => (
+              <div
+                key={option.id}
+                id={`${listId}-${option.id}`}
+                role="option"
+                aria-selected={option.id === value}
+                className={`cursor-pointer px-3 py-2 ${index === activeIndex ? "bg-mint-50 text-navy-900" : "text-slate-700 hover:bg-navy-50"}`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  chooseOption(option);
+                }}
+              >
+                <div className="truncate font-bold">{option.label}</div>
+                {option.description && <div className="truncate text-xs text-slate-500">{option.description}</div>}
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-2 text-sm text-slate-500">{emptyMessage}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AttendanceView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
   const sortedClients = sortClientsForDisplay(data.clients);
   const sortedWorkers = sortWorkersForDisplay(data.workers);
@@ -1804,6 +1973,55 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
     memo: ""
   });
   const requestSites = sortSitesForDisplay(data.sites.filter((site) => site.clientId === requestForm.clientId));
+  const selectedRequestClient = sortedClients.find((client) => client.id === requestForm.clientId);
+  const selectedRequestSite = requestSites.find((site) => site.id === requestForm.siteId);
+  const clientOptions = sortedClients.map((client) => ({
+    id: client.id,
+    label: getClientDisplayName(client),
+    description: [client.managerName, client.phone].filter(Boolean).join(" · "),
+    keywords: [client.name, client.managerName, client.phone, client.fax, client.email, client.email2].join(" ")
+  }));
+  const siteOptions = requestSites.map((site) => ({
+    id: site.id,
+    label: getSiteDisplayName(site),
+    description: [site.siteCode, site.managerName].filter(Boolean).join(" · "),
+    keywords: [site.siteName, site.name, site.siteCode, site.managerName, site.displayName].join(" ")
+  }));
+  const [clientSearch, setClientSearch] = useState(selectedRequestClient ? getClientDisplayName(selectedRequestClient) : "");
+  const [siteSearch, setSiteSearch] = useState(selectedRequestSite ? getSiteDisplayName(selectedRequestSite) : "");
+
+  useEffect(() => {
+    setClientSearch(selectedRequestClient ? getClientDisplayName(selectedRequestClient) : "");
+  }, [selectedRequestClient?.id, selectedRequestClient?.name]);
+
+  useEffect(() => {
+    setSiteSearch(selectedRequestSite ? getSiteDisplayName(selectedRequestSite) : "");
+  }, [selectedRequestSite?.id, selectedRequestSite?.siteName, selectedRequestSite?.name]);
+
+  useEffect(() => {
+    if (data.clients.length === 0) return;
+    setRequestForm((current) => {
+      const clientExists = data.clients.some((client) => client.id === current.clientId);
+      if (clientExists) {
+        const siteExists = data.sites.some((site) => site.clientId === current.clientId && site.id === current.siteId);
+        if (!current.siteId || siteExists) return current;
+        return { ...current, siteId: "" };
+      }
+
+      const clientId = sortClientsForDisplay(data.clients)[0]?.id ?? "";
+      const site = sortSitesForDisplay(data.sites.filter((item) => item.clientId === clientId))[0];
+      const siteId = site?.id ?? "";
+      return {
+        ...current,
+        clientId,
+        siteId,
+        taskDescription: !normalizeTaskDescription(current.taskDescription).trim() ? site?.defaultTaskDescription || normalizeTaskDescription(current.taskDescription) : current.taskDescription,
+        unitPrice: !current.siteId ? site?.defaultUnitPrice ?? current.unitPrice : current.unitPrice,
+        deductionType: !current.siteId ? site?.defaultDeductionType ?? current.deductionType : current.deductionType
+      };
+    });
+  }, [data.clients, data.sites]);
+
   const requests = normalizeRequestStatuses(data.workRequests, data.assignments).sort((a, b) => b.workDate.localeCompare(a.workDate));
   const selectedRequest = requests.find((request) => request.id === selectedRequestId) ?? requests[0];
   const selectedAssignments = selectedRequest ? data.assignments.filter((assignment) => assignment.requestId === selectedRequest.id && assignment.status !== "취소") : [];
@@ -1828,7 +2046,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
           workDate: selectedRequest.workDate,
           clientId: selectedRequest.clientId,
           siteId: selectedRequest.siteId,
-          taskDescription: selectedRequest.taskDescription,
+          taskDescription: normalizeTaskDescription(selectedRequest.taskDescription),
           unitPrice: assignmentForm.unitPrice,
           workCount: assignmentForm.workCount,
           deductionType: assignmentForm.deductionType,
@@ -1847,22 +2065,24 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
       : calculateByRule(assignmentForm.unitPrice, assignmentForm.workCount, assignmentForm.deductionType, data.calculationRules);
 
   const changeRequestClient = (clientId: string) => {
-    const site = sortSitesForDisplay(data.sites.filter((item) => item.clientId === clientId))[0];
+    const currentSite = data.sites.find((item) => item.id === requestForm.siteId);
+    const nextSiteId = currentSite?.clientId === clientId ? currentSite.id : "";
     setRequestForm({
       ...requestForm,
       clientId,
-      siteId: site?.id ?? "",
-      taskDescription: site?.defaultTaskDescription || requestForm.taskDescription,
-      unitPrice: site?.defaultUnitPrice ?? requestForm.unitPrice,
-      deductionType: site?.defaultDeductionType ?? requestForm.deductionType
+      siteId: nextSiteId
     });
   };
 
   const changeRequestSite = (siteId: string) => {
-    const site = data.sites.find((item) => item.id === siteId);
+    const site = data.sites.find((item) => item.id === siteId && item.clientId === requestForm.clientId);
+    if (!site) {
+      setRequestForm({ ...requestForm, siteId: "" });
+      return;
+    }
     setRequestForm({
       ...requestForm,
-      siteId,
+      siteId: site.id,
       taskDescription: site?.defaultTaskDescription || requestForm.taskDescription,
       unitPrice: site?.defaultUnitPrice ?? requestForm.unitPrice,
       deductionType: site?.defaultDeductionType ?? requestForm.deductionType
@@ -1871,10 +2091,10 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
 
   const saveRequest = () => {
     if (!requestForm.siteId) return alert("현장을 선택해 주세요.");
-    if (!requestForm.taskDescription.trim()) return alert("작업내용을 입력해 주세요.");
     const request: WorkRequest = {
       ...requestForm,
       id: createId("req"),
+      taskDescription: normalizeTaskDescription(requestForm.taskDescription).trim() ? normalizeTaskDescription(requestForm.taskDescription) : "",
       status: "배치대기"
     };
     const nextRequests = normalizeRequestStatuses([...data.workRequests, request], data.assignments);
@@ -1912,7 +2132,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
         workDate: selectedRequest.workDate,
         clientId: selectedRequest.clientId,
         siteId: selectedRequest.siteId,
-        taskDescription: selectedRequest.taskDescription,
+        taskDescription: normalizeTaskDescription(selectedRequest.taskDescription),
         unitPrice: assignmentForm.unitPrice,
         workCount: assignmentForm.workCount,
         deductionType: assignmentForm.deductionType,
@@ -1958,7 +2178,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
         workDate: selectedRequest.workDate,
         clientId: selectedRequest.clientId,
         siteId: selectedRequest.siteId,
-        taskDescription: selectedRequest.taskDescription,
+        taskDescription: normalizeTaskDescription(selectedRequest.taskDescription),
         unitPrice: assignmentForm.unitPrice,
         workCount: assignmentForm.workCount,
         deductionType: assignmentForm.deductionType,
@@ -1985,8 +2205,40 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
       <Panel title="요청건 등록">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <Field label="근무일"><TextInput type="date" value={requestForm.workDate} onChange={(e) => setRequestForm({ ...requestForm, workDate: e.target.value })} /></Field>
-          <Field label="거래처"><SelectInput value={requestForm.clientId} onChange={(e) => changeRequestClient(e.target.value)}>{sortedClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</SelectInput></Field>
-          <Field label="현장"><SelectInput value={requestForm.siteId} onChange={(e) => changeRequestSite(e.target.value)}>{requestSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</SelectInput></Field>
+          <Field label="거래처">
+            <SearchableComboBox
+              value={requestForm.clientId}
+              inputValue={clientSearch}
+              options={clientOptions}
+              placeholder="거래처명 검색"
+              emptyMessage="검색 결과가 없습니다."
+              disabled={sortedClients.length === 0}
+              onInputChange={setClientSearch}
+              onSelect={(clientId) => {
+                const client = sortedClients.find((item) => item.id === clientId);
+                const keepSite = data.sites.some((site) => site.id === requestForm.siteId && site.clientId === clientId);
+                setClientSearch(client ? getClientDisplayName(client) : "");
+                if (!keepSite) setSiteSearch("");
+                changeRequestClient(clientId);
+              }}
+            />
+          </Field>
+          <Field label="현장">
+            <SearchableComboBox
+              value={requestForm.siteId}
+              inputValue={siteSearch}
+              options={siteOptions}
+              placeholder={requestForm.clientId ? "현장명 검색" : "거래처를 먼저 선택"}
+              emptyMessage={requestForm.clientId ? "검색 결과가 없습니다." : "거래처를 먼저 선택해 주세요."}
+              disabled={!requestForm.clientId}
+              onInputChange={setSiteSearch}
+              onSelect={(siteId) => {
+                const site = requestSites.find((item) => item.id === siteId);
+                setSiteSearch(site ? getSiteDisplayName(site) : "");
+                changeRequestSite(siteId);
+              }}
+            />
+          </Field>
           <Field label="요청인원"><TextInput type="number" value={requestForm.requestedCount} onChange={(e) => setRequestForm({ ...requestForm, requestedCount: Number(e.target.value) })} /></Field>
           <Field label="단가"><TextInput type="number" value={requestForm.unitPrice} onChange={(e) => setRequestForm({ ...requestForm, unitPrice: Number(e.target.value) })} /></Field>
           <Field label="공제유형"><DeductionSelect value={requestForm.deductionType} onChange={(value) => setRequestForm({ ...requestForm, deductionType: value })} /></Field>
@@ -2012,7 +2264,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
             <div className="rounded-md border border-navy-100 bg-navy-50 p-4 text-sm">
               <p className="text-lg font-bold text-navy-900">{data.clients.find((client) => client.id === selectedRequest.clientId)?.name} / {data.sites.find((site) => site.id === selectedRequest.siteId)?.name}</p>
               <p className="mt-2">근무일: {selectedRequest.workDate}</p>
-              <p>작업내용: {selectedRequest.taskDescription}</p>
+              <p>작업내용: {displayTaskDescription(selectedRequest.taskDescription)}</p>
               <p>요청 {selectedRequest.requestedCount}명 / 배치 {selectedAssignedCount}명 / 부족 {selectedShortageCount}명</p>
               <p>요청 대비 배치율: {selectedAssignmentRate}%</p>
               <p>집합장소: {selectedRequest.meetingPlace || "-"}</p>
@@ -2670,7 +2922,7 @@ function WorkerJournalView({ data }: { data: AppData }) {
         siteName: site?.siteName || site?.name || "",
         siteCode: site?.siteCode || site?.code || "",
         jobType: worker?.jobType || "일용",
-        taskDescription: assignment.taskDescription,
+        taskDescription: normalizeTaskDescription(assignment.taskDescription),
         laborCost: assignment.laborCost,
         deductionAmount: assignment.deductionAmount,
         paymentAmount: assignment.paymentAmount,
@@ -2692,7 +2944,7 @@ function WorkerJournalView({ data }: { data: AppData }) {
       현장명: row.siteName,
       현장코드: row.siteCode,
       근무직종: row.jobType,
-      작업내용: row.taskDescription,
+      작업내용: displayTaskDescription(row.taskDescription),
       일급여: row.laborCost,
       공제금액: row.deductionAmount,
       실지급액: row.paymentAmount,
@@ -2750,7 +3002,7 @@ function WorkerJournalView({ data }: { data: AppData }) {
                   <td className={td}>{row.siteName}</td>
                   <td className={td}>{row.siteCode}</td>
                   <td className={td}>{row.jobType}</td>
-                  <td className={td}>{row.taskDescription}</td>
+                  <td className={td}>{displayTaskDescription(row.taskDescription)}</td>
                   <td className={td}>{formatWon(row.laborCost)}</td>
                   <td className={td}>{formatWon(row.deductionAmount)}</td>
                   <td className={td}>{formatWon(row.paymentAmount)}</td>
@@ -3859,7 +4111,7 @@ function RequestTable({
               <td className={td}>{request.workDate}</td>
               <td className={td}>{data.clients.find((client) => client.id === request.clientId)?.name}</td>
               <td className={td}>{data.sites.find((site) => site.id === request.siteId)?.name}</td>
-              <td className={td}>{onSelect ? <button className="font-bold text-navy-900" onClick={() => onSelect(request)}>{request.taskDescription}</button> : request.taskDescription}</td>
+              <td className={td}>{onSelect ? <button className="font-bold text-navy-900" onClick={() => onSelect(request)}>{displayTaskDescription(request.taskDescription)}</button> : displayTaskDescription(request.taskDescription)}</td>
               <td className={td}>{request.requestedCount}</td>
               <td className={td}>{assigned}</td>
               <td className={td}>{Math.max(request.requestedCount - assigned, 0)}</td>
@@ -3890,7 +4142,7 @@ function getDisplayAssignment(assignment: WorkAssignment, data: AppData) {
       workDate: assignment.workDate,
       clientId: assignment.clientId,
       siteId: assignment.siteId,
-      taskDescription: assignment.taskDescription,
+      taskDescription: normalizeTaskDescription(assignment.taskDescription),
       unitPrice: assignment.unitPrice,
       workCount: assignment.workCount,
       deductionType: assignment.deductionType,
@@ -3917,6 +4169,7 @@ function getDisplayAssignment(assignment: WorkAssignment, data: AppData) {
   const laborCost = calculated.laborCost || Math.round((calculated.deductionBaseAmount || assignment.unitPrice) * assignment.workCount);
   return {
     ...assignment,
+    taskDescription: normalizeTaskDescription(calculated.taskDescription || assignment.taskDescription),
     deductionBaseAmount: calculated.deductionBaseAmount || assignment.deductionBaseAmount,
     invoiceIssueType: calculated.invoiceIssueType || assignment.invoiceIssueType,
     invoiceDeductionRate: calculated.invoiceDeductionRate ?? assignment.invoiceDeductionRate,
@@ -3952,7 +4205,7 @@ function AssignmentTable({ assignments, data, actions }: { assignments: WorkAssi
                 <td className={td}>{data.clients.find((client) => client.id === display.clientId)?.name}</td>
                 <td className={td}>{data.sites.find((site) => site.id === display.siteId)?.name}</td>
                 <td className={td}>{data.workers.find((worker) => worker.id === display.workerId)?.name}</td>
-                <td className={td}>{display.taskDescription}</td>
+                <td className={td}>{displayTaskDescription(display.taskDescription)}</td>
                 <td className={td}>{formatWon(display.unitPrice)}</td>
                 <td className={td}>{display.workCount}</td>
                 <td className={td}>{formatWon(display.laborCost)}</td>

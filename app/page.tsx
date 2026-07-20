@@ -1293,15 +1293,15 @@ function WorkersView({ data, updateData }: { data: AppData; updateData: (data: A
     }
     const dataUrl = getWorkerDocumentDataUrl(form, kind);
     if (!dataUrl) return;
-    downloadDataUrl(dataUrl, `${form.name || "???"}_${workerDocumentLabels[kind]}.png`);
+    downloadDataUrl(dataUrl, `${form.name || "이름미입력"}_${workerDocumentLabels[kind]}.png`);
   };
 
   const downloadSelectedWorkerFiles = async () => {
-    if (!(await downloadWorkerAttachments(form))) alert("????? ????? ????.");
+    if (!(await downloadWorkerAttachments(form))) alert("첨부파일을 다운로드할 수 없습니다.");
   };
 
   const downloadAllWorkerFiles = async () => {
-    if (!(await downloadAttachmentsZip(data.workers, `?????_????_${today}.zip`))) alert("ZIP?? ????? ????? ????.");
+    if (!(await downloadAttachmentsZip(data.workers, `근로자_첨부파일_${today}.zip`))) alert("ZIP 파일을 생성할 수 없습니다.");
   };
 
   const printWorkerDocument = () => {
@@ -2249,7 +2249,7 @@ function PrintPage({ title, subtitle, orientation = "portrait", companyInfo, chi
       {children}
       {companyInfo && (
         <div className="mt-6 border-t border-slate-300 pt-2 text-[11px] text-slate-500">
-          {companyInfo.companyName} / ?? {companyInfo.companyRepresentative} / {companyInfo.companyAddress} / {companyInfo.bankAccountText}
+          {companyInfo.companyName} / 대표 {companyInfo.companyRepresentative} / {companyInfo.companyAddress} / {companyInfo.bankAccountText}
         </div>
       )}
     </section>
@@ -3295,17 +3295,17 @@ function SettingsView({
 
       <Panel title="역할 및 메뉴 접근 권한">
         <div className="mb-3 grid grid-cols-1 gap-3 rounded-md bg-navy-50 p-3 text-sm font-bold text-navy-900 sm:grid-cols-3">
-          <span>?? ??: {roleLabels[accessControl.currentRole]}</span>
-          <span>???: ?? ?? ?? ??</span>
-          <span>?????: ??? ??? ??</span>
+          <span>현재 역할: {roleLabels[accessControl.currentRole]}</span>
+          <span>관리자: 전체 메뉴 보기</span>
+          <span>일반사용자: 선택한 메뉴만 보기</span>
         </div>
         <label className="mb-3 flex min-h-11 items-center gap-2 rounded-md border border-navy-100 bg-white px-3 text-sm font-semibold text-slate-700">
           <input type="checkbox" checked={Boolean(accessControl.sensitiveProtectionEnabled)} onChange={(event) => updateSensitiveProtection(event.target.checked)} />
-          ???? ?? ?? ??
+          민감 정보 보호 사용
         </label>
         <DataTable>
           <table className="w-full border-collapse">
-            <thead><tr>{["??", "??? ??", "????? ??", "????"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+            <thead><tr>{["메뉴", "관리자 권한", "일반사용자 권한", "민감 정보"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
             <tbody>
               {menus.map((menu) => {
                 const permission = accessControl.menuPermissions.find((item) => item.viewKey === menu.key);
@@ -3733,17 +3733,17 @@ function WorkerFileField({
           {isImage ? <img src={value} alt={label} className="h-20 w-28 rounded border border-navy-100 object-cover" /> : <div className="flex h-20 w-28 items-center justify-center rounded border border-navy-100 bg-slate-50 text-xs font-bold text-slate-500">FILE</div>}
           <div className="min-w-0 flex-1 text-xs text-slate-600">
             <p className="truncate font-bold text-navy-900">{attachment?.fileName || "저장된 첨부파일"}</p>
-            <p>??: {label}</p>
+            <p>구분: {label}</p>
             <p>업로드일: {attachment?.uploadedAt || "-"}</p>
-            {attachment?.originalFileName && <p className="truncate">??: {attachment.originalFileName}</p>}
+            {attachment?.originalFileName && <p className="truncate">원본 파일명: {attachment.originalFileName}</p>}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={onDownload}>다운로드</Button>
-            <Button variant="danger" onClick={onDelete}>??</Button>
+            <Button variant="danger" onClick={onDelete}>삭제</Button>
           </div>
         </div>
       ) : (
-        <p className="text-xs text-slate-400">??? ?? ??</p>
+        <p className="text-xs text-slate-400">첨부파일 없음</p>
       )}
     </div>
   );

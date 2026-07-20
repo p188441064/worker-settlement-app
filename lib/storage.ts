@@ -125,7 +125,7 @@ function migrateWorkerAttachments(worker: Partial<Worker>, workerId: string): Wo
     ...attachment,
     id: attachment.id || `wa-${workerId}-${attachment.kind}`,
     workerId: attachment.workerId || workerId,
-    fileName: attachment.fileName || `${worker.name || "???"}_${worker.birthDate || "생년월일미입력"}_${attachment.kind}_${attachment.uploadedAt || new Date().toISOString().slice(0, 10)}`,
+    fileName: attachment.fileName || `${worker.name || "이름미입력"}_${worker.birthDate || "생년월일미입력"}_${attachment.kind}_${attachment.uploadedAt || new Date().toISOString().slice(0, 10)}`,
     originalFileName: attachment.originalFileName || attachment.fileName || "attachment",
     mimeType: attachment.mimeType || "application/octet-stream",
     uploadedAt: attachment.uploadedAt || worker.registrationDate || new Date().toISOString().slice(0, 10)

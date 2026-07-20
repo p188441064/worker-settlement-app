@@ -643,7 +643,7 @@ export async function testSupabaseStorageConnection(): Promise<SupabaseTestResul
   try {
     const accessToken = getCurrentSupabaseAccessToken();
     const headers = getSupabaseAuthHeaders(config, accessToken);
-    if (!headers) throw new Error("Supabase ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??");
+    if (!headers) throw new Error("Supabase 환경변수가 설정되지 않았습니다.");
     const uploadResponse = await fetch(requestUrl, {
       method: "POST",
       headers: {

@@ -21,6 +21,8 @@ import {
 import type { SupabaseConnectionResult, SupabaseSaveResult, SupabaseSnapshotInfo, SupabaseSnapshotListItem, SupabaseSnapshotPreview, SupabaseSnapshotRestoreResult, SupabaseSnapshotRestoreStage, SupabaseTestResult } from "@/lib/supabase-app-data";
 import { getSupabaseAuthSession, supabaseAuth } from "@/lib/supabase-auth";
 import type { SupabaseAuthSession } from "@/lib/supabase-auth";
+import { COMPANY_ASSET_ACCEPT, deleteCompanyAssetFile, downloadCompanyAssetFile, getCompanyAssetFileName, getCompanyAssetLabel, uploadCompanyAssetFile } from "@/lib/company-assets";
+import type { CompanyAssetKind } from "@/lib/company-assets";
 import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
 import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
@@ -624,8 +626,8 @@ export default function Home() {
   }
 
   const updateData = (next: AppData) => setData(next);
-  const saveOperationalData = async () => {
-    const result = await saveAppDataToSupabase(data);
+  const saveOperationalData = async (nextData = data) => {
+    const result = await saveAppDataToSupabase(nextData);
     lastSupabaseSaveRef.current = cloudSaveFingerprint(result.data);
     failedSupabaseSaveRef.current = "";
     setData(result.data);
@@ -2721,7 +2723,7 @@ function SettingsView({
   data: AppData;
   updateData: (data: AppData) => void;
   authSession: SupabaseAuthSession;
-  onSaveOperationalData: () => Promise<SupabaseSaveResult>;
+  onSaveOperationalData: (nextData?: AppData) => Promise<SupabaseSaveResult>;
   onRestoreSnapshot: (snapshotPath: string, onProgress?: (stage: SupabaseSnapshotRestoreStage) => void) => Promise<SupabaseSnapshotRestoreResult>;
 }) {
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseConnectionResult | null>(null);
@@ -2735,9 +2737,133 @@ function SettingsView({
   const [snapshotAction, setSnapshotAction] = useState<"idle" | "listing" | "previewing" | "downloading" | "backingUp" | "restoring" | "complete" | "error">("idle");
   const [snapshotMessage, setSnapshotMessage] = useState("");
   const [snapshotError, setSnapshotError] = useState("");
+  const [companyAssetPreviews, setCompanyAssetPreviews] = useState<Record<CompanyAssetKind, { url: string; mimeType: string; loading: boolean; error: string }>>({
+    seal: { url: "", mimeType: "", loading: false, error: "" },
+    nameplate: { url: "", mimeType: "", loading: false, error: "" }
+  });
+  const [companyAssetAction, setCompanyAssetAction] = useState<CompanyAssetKind | "">("");
+  const companyAssetPreviewUrlsRef = useRef<Record<CompanyAssetKind, string>>({ seal: "", nameplate: "" });
 
   const updateCompanyInfo = (key: keyof AppData["companyInfo"], value: string) => {
     updateData({ ...data, companyInfo: { ...data.companyInfo, [key]: value } });
+  };
+
+  const companyAssetPathKey = (kind: CompanyAssetKind): "sealPath" | "nameplatePath" => (kind === "seal" ? "sealPath" : "nameplatePath");
+
+  const setCompanyAssetPreview = (kind: CompanyAssetKind, preview: { url: string; mimeType: string; loading: boolean; error: string }) => {
+    setCompanyAssetPreviews((current) => ({ ...current, [kind]: preview }));
+  };
+
+  const revokeCompanyAssetPreview = (kind: CompanyAssetKind) => {
+    const currentUrl = companyAssetPreviewUrlsRef.current[kind];
+    if (currentUrl) URL.revokeObjectURL(currentUrl);
+    companyAssetPreviewUrlsRef.current[kind] = "";
+  };
+
+  const clearCompanyAssetPreview = (kind: CompanyAssetKind) => {
+    revokeCompanyAssetPreview(kind);
+    setCompanyAssetPreview(kind, { url: "", mimeType: "", loading: false, error: "" });
+  };
+
+  const refreshCompanyAssetPreview = async (kind: CompanyAssetKind, path: string) => {
+    if (!path) {
+      clearCompanyAssetPreview(kind);
+      return;
+    }
+    setCompanyAssetPreview(kind, { url: "", mimeType: "", loading: true, error: "" });
+    try {
+      const blob = await downloadCompanyAssetFile(path);
+      if (!blob) {
+        revokeCompanyAssetPreview(kind);
+        setCompanyAssetPreview(kind, { url: "", mimeType: "", loading: false, error: "Storage 파일을 찾을 수 없습니다." });
+        return;
+      }
+      const previewUrl = URL.createObjectURL(blob);
+      revokeCompanyAssetPreview(kind);
+      companyAssetPreviewUrlsRef.current[kind] = previewUrl;
+      setCompanyAssetPreview(kind, { url: previewUrl, mimeType: blob.type, loading: false, error: "" });
+    } catch (error) {
+      revokeCompanyAssetPreview(kind);
+      setCompanyAssetPreview(kind, {
+        url: "",
+        mimeType: "",
+        loading: false,
+        error: error instanceof Error ? error.message : "미리보기를 불러오지 못했습니다."
+      });
+    }
+  };
+
+  const applyCompanyAssetSaveResult = (result: SupabaseSaveResult, message: string) => {
+    setOperationalSaveResult(result);
+    setSnapshotInfo({
+      configured: true,
+      snapshotFound: true,
+      revision: result.revision,
+      exportedAt: result.savedAt,
+      appDataPath: result.path,
+      checkedAt: result.savedAt,
+      message
+    });
+  };
+
+  const uploadCompanyAsset = async (kind: CompanyAssetKind, file: File) => {
+    if (data.cloudSync.conflict) {
+      alert("클라우드 충돌 상태에서는 회사 파일을 업로드할 수 없습니다. 클라우드 최신 데이터를 먼저 확인해 주세요.");
+      return;
+    }
+    const label = getCompanyAssetLabel(kind);
+    setCompanyAssetAction(kind);
+    try {
+      const uploaded = await uploadCompanyAssetFile(kind, file);
+      if (!uploaded) throw new Error("Supabase Storage 설정을 확인해 주세요.");
+      const pathKey = companyAssetPathKey(kind);
+      const nextData = {
+        ...data,
+        companyInfo: {
+          ...data.companyInfo,
+          [pathKey]: uploaded.storagePath
+        }
+      };
+      const saveResult = await onSaveOperationalData(nextData);
+      applyCompanyAssetSaveResult(saveResult, `${label} 경로가 current.json에 저장되었습니다.`);
+      await refreshCompanyAssetPreview(kind, uploaded.storagePath);
+      alert(`${label} 업로드 완료\n파일명: ${uploaded.fileName}\n저장 경로: ${uploaded.storagePath}`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : `${label} 업로드 중 오류가 발생했습니다.`);
+    } finally {
+      setCompanyAssetAction("");
+    }
+  };
+
+  const deleteCompanyAsset = async (kind: CompanyAssetKind) => {
+    if (data.cloudSync.conflict) {
+      alert("클라우드 충돌 상태에서는 회사 파일을 삭제할 수 없습니다. 클라우드 최신 데이터를 먼저 확인해 주세요.");
+      return;
+    }
+    const pathKey = companyAssetPathKey(kind);
+    const path = data.companyInfo[pathKey];
+    if (!path) return;
+    const label = getCompanyAssetLabel(kind);
+    if (!confirm(`${label} 파일을 삭제하고 current.json의 경로를 제거할까요?`)) return;
+    setCompanyAssetAction(kind);
+    try {
+      const nextData = {
+        ...data,
+        companyInfo: {
+          ...data.companyInfo,
+          [pathKey]: ""
+        }
+      };
+      const saveResult = await onSaveOperationalData(nextData);
+      applyCompanyAssetSaveResult(saveResult, `${label} 경로가 current.json에서 제거되었습니다.`);
+      await deleteCompanyAssetFile(path);
+      clearCompanyAssetPreview(kind);
+      alert(`${label} 삭제 완료\n삭제 경로: ${path}`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : `${label} 삭제 중 오류가 발생했습니다.`);
+    } finally {
+      setCompanyAssetAction("");
+    }
   };
 
   const updatePermission = (viewKey: ViewKey, role: UserRole, checked: boolean) => {
@@ -2891,6 +3017,20 @@ function SettingsView({
       setCloudAction("idle");
     }
   };
+
+  useEffect(() => {
+    refreshCompanyAssetPreview("seal", data.companyInfo.sealPath);
+    refreshCompanyAssetPreview("nameplate", data.companyInfo.nameplatePath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.companyInfo.sealPath, data.companyInfo.nameplatePath, authSession.accessToken]);
+
+  useEffect(() => {
+    return () => {
+      revokeCompanyAssetPreview("seal");
+      revokeCompanyAssetPreview("nameplate");
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const formatSnapshotDate = (value: string) => {
     if (!value) return "-";
@@ -3082,6 +3222,29 @@ function SettingsView({
           <div className="lg:col-span-2"><Field label="주소"><TextInput value={data.companyInfo.companyAddress} onChange={(event) => updateCompanyInfo("companyAddress", event.target.value)} /></Field></div>
           <div className="xl:col-span-2 lg:col-span-3"><Field label="입금계좌/비고"><TextInput value={data.companyInfo.bankAccountText} onChange={(event) => updateCompanyInfo("bankAccountText", event.target.value)} /></Field></div>
         </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <CompanyAssetField
+            kind="seal"
+            label="회사 사용인감"
+            path={data.companyInfo.sealPath}
+            preview={companyAssetPreviews.seal}
+            busy={companyAssetAction === "seal"}
+            disabled={!authSession || !canUseOperationalCloudData || Boolean(companyAssetAction) || hasCloudConflict}
+            onFileChange={(file) => uploadCompanyAsset("seal", file)}
+            onDelete={() => deleteCompanyAsset("seal")}
+          />
+          <CompanyAssetField
+            kind="nameplate"
+            label="회사 명판"
+            path={data.companyInfo.nameplatePath}
+            preview={companyAssetPreviews.nameplate}
+            busy={companyAssetAction === "nameplate"}
+            disabled={!authSession || !canUseOperationalCloudData || Boolean(companyAssetAction) || hasCloudConflict}
+            onFileChange={(file) => uploadCompanyAsset("nameplate", file)}
+            onDelete={() => deleteCompanyAsset("nameplate")}
+          />
+        </div>
+        <p className="mt-3 text-xs text-slate-500">회사 파일은 worker-documents/local-org/company/ 경로에 저장하고, current.json에는 Storage 경로만 저장합니다.</p>
       </Panel>
 
       <Panel
@@ -3336,6 +3499,73 @@ function SettingsView({
         </div>
         <p className="mt-3 text-xs text-slate-500">신규 운영 시작 시 기본 데이터는 비어 있으며, 샘플 데이터는 상단 버튼으로 필요할 때만 생성됩니다. 실제 운영 전 JSON 백업을 내려받아 보관해 주세요.</p>
       </Panel>
+    </div>
+  );
+}
+
+function CompanyAssetField({
+  kind,
+  label,
+  path,
+  preview,
+  busy,
+  disabled,
+  onFileChange,
+  onDelete
+}: {
+  kind: CompanyAssetKind;
+  label: string;
+  path: string;
+  preview: { url: string; mimeType: string; loading: boolean; error: string };
+  busy: boolean;
+  disabled: boolean;
+  onFileChange: (file: File) => void;
+  onDelete: () => void;
+}) {
+  const registeredFileName = path ? path.split("/").pop() || getCompanyAssetFileName(kind) : "등록된 파일 없음";
+  const isPdf = preview.mimeType.toLowerCase().includes("pdf");
+  return (
+    <div className="rounded-md border border-navy-100 bg-white p-4 text-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold text-slate-500">{label}</p>
+          <p className="mt-1 break-all font-bold text-navy-900">{registeredFileName}</p>
+          <p className="mt-1 break-all text-xs text-slate-500">저장 경로: {path || `local-org/company/${getCompanyAssetFileName(kind)}`}</p>
+        </div>
+        <Button variant="danger" onClick={onDelete} disabled={disabled || busy || !path}>삭제</Button>
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-md border border-navy-100 bg-navy-50">
+        {preview.loading ? (
+          <div className="grid h-44 place-items-center text-xs font-semibold text-slate-500">미리보기 불러오는 중</div>
+        ) : preview.url ? (
+          isPdf ? (
+            <iframe src={preview.url} title={`${label} 미리보기`} className="h-56 w-full bg-white" />
+          ) : (
+            <img src={preview.url} alt={`${label} 미리보기`} className="h-44 w-full object-contain bg-white" />
+          )
+        ) : (
+          <div className="grid h-44 place-items-center px-4 text-center text-xs text-slate-500">
+            {preview.error || "등록된 파일이 없습니다."}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3">
+        <p className="mb-2 text-xs font-semibold text-slate-500">{path ? "파일 교체" : "파일 선택"}</p>
+        <input
+          type="file"
+          accept={COMPANY_ASSET_ACCEPT}
+          disabled={disabled || busy}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) onFileChange(file);
+            event.currentTarget.value = "";
+          }}
+          className="w-full text-sm text-slate-600 file:mr-3 file:min-h-10 file:rounded-md file:border-0 file:bg-mint-500 file:px-4 file:text-sm file:font-bold file:text-navy-900 disabled:opacity-50"
+        />
+        <p className="mt-2 text-xs text-slate-500">PNG, JPG/JPEG, PDF 파일을 5MB 이하로 업로드할 수 있습니다. 교체 시 같은 Storage 경로에 덮어씁니다.</p>
+      </div>
     </div>
   );
 }

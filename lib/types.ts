@@ -272,6 +272,8 @@ export interface CompanyInfo {
   businessNumber: string;
   companyPhone: string;
   bankAccountText: string;
+  sealPath: string;
+  nameplatePath: string;
 }
 
 export interface ReceivablePayment {

@@ -26,7 +26,9 @@ export const productionData: AppData = {
     companyRepresentative: "",
     businessNumber: "",
     companyPhone: "",
-    bankAccountText: ""
+    bankAccountText: "",
+    sealPath: "",
+    nameplatePath: ""
   },
   accessControl: sampleData.accessControl,
   cloudSync: createDefaultCloudSyncConfig(),
@@ -311,7 +313,9 @@ function migrateCompanyInfo(companyInfo: Partial<AppData["companyInfo"]> | undef
     companyRepresentative: companyInfo?.companyRepresentative || sampleData.companyInfo.companyRepresentative,
     businessNumber: companyInfo?.businessNumber || sampleData.companyInfo.businessNumber,
     companyPhone: companyInfo?.companyPhone || sampleData.companyInfo.companyPhone || "",
-    bankAccountText: companyInfo?.bankAccountText || sampleData.companyInfo.bankAccountText
+    bankAccountText: companyInfo?.bankAccountText || sampleData.companyInfo.bankAccountText,
+    sealPath: companyInfo?.sealPath || "",
+    nameplatePath: companyInfo?.nameplatePath || ""
   };
 }
 

@@ -184,7 +184,9 @@ export const sampleData: AppData = {
     companyRepresentative: "홍길동",
     businessNumber: "000-00-00000",
     companyPhone: "02-0000-0000",
-    bankAccountText: "샘플은행 000-000000-00-000 예금주: 주식회사 샘플인력"
+    bankAccountText: "샘플은행 000-000000-00-000 예금주: 주식회사 샘플인력",
+    sealPath: "",
+    nameplatePath: ""
   },
   accessControl: {
     currentRole: "ADMIN",

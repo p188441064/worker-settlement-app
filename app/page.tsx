@@ -24,8 +24,9 @@ import type { SupabaseAuthSession } from "@/lib/supabase-auth";
 import { COMPANY_ASSET_ACCEPT, deleteCompanyAssetFile, downloadCompanyAssetFile, getCompanyAssetFileName, getCompanyAssetLabel, uploadCompanyAssetFile } from "@/lib/company-assets";
 import type { CompanyAssetKind } from "@/lib/company-assets";
 import { createWorkerAttachmentFromFile, deleteWorkerAttachmentStorage, downloadAttachmentsZip, downloadDataUrl, downloadWorkerAttachment, downloadWorkerAttachments, getWorkerAttachment, getWorkerDocumentDataUrl, removeWorkerAttachment, upsertWorkerAttachment, workerDocumentLabels } from "@/lib/worker-documents";
-import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, RequestStatus, Site, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
+import { AppData, AssignmentStatus, CalculationRule, Client, DeductionType, DocumentStatus, IncomeTaxMode, InsuranceCalculationBasis, RequestStatus, Site, StatutoryRateTable, StatutoryRoundingRule, StatutoryWorkerType, UserRole, ViewKey, WorkAssignment, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "@/lib/types";
 import { calculatePayrollDeduction } from "@/lib/payrollRules";
+import { createEmptyStatutoryRateTable, getApplicableStatutoryRate, incomeTaxModeLabel, insuranceBasisLabel, roundingRuleLabel, statutoryWorkerTypeLabel } from "@/lib/statutory-rates";
 
 const menus: Array<{ key: ViewKey; label: string }> = [
   { key: "dashboard", label: "대시보드" },
@@ -205,6 +206,11 @@ const emptySite: Site = {
 };
 
 const emptyRule: CalculationRule = createCalculationRule("", 150000, "고용보험");
+const emptyStatutoryRate = createEmptyStatutoryRateTable("", new Date().getFullYear(), "DAILY");
+
+function formatRatePercent(value: number) {
+  return `${((Number(value) || 0) * 100).toLocaleString("ko-KR", { maximumFractionDigits: 4 })}%`;
+}
 
 function hydrateSite(site: Site, clients: Client[]): Site {
   const client = clients.find((item) => item.id === site.clientId);
@@ -2052,6 +2058,8 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
           deductionType: assignmentForm.deductionType,
           existingAssignments: data.assignments,
           calculationRules: data.calculationRules,
+          statutoryRatesEnabled: data.statutoryRateSettings.enabled,
+          statutoryRateTables: data.statutoryRateTables,
           manual: {
             employmentInsurance: assignmentForm.manualEmploymentInsurance ? Number(assignmentForm.manualEmploymentInsurance) : undefined,
             healthInsurance: assignmentForm.manualHealthInsurance ? Number(assignmentForm.manualHealthInsurance) : undefined,
@@ -2138,6 +2146,8 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
         deductionType: assignmentForm.deductionType,
         existingAssignments: data.assignments,
         calculationRules: data.calculationRules,
+        statutoryRatesEnabled: data.statutoryRateSettings.enabled,
+        statutoryRateTables: data.statutoryRateTables,
         manual: {
           employmentInsurance: assignmentForm.manualEmploymentInsurance ? Number(assignmentForm.manualEmploymentInsurance) : undefined,
           healthInsurance: assignmentForm.manualHealthInsurance ? Number(assignmentForm.manualHealthInsurance) : undefined,
@@ -2151,6 +2161,10 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
       id: createId("as"),
       memo: assignmentForm.memo
     };
+    if (data.statutoryRateSettings.enabled && !assignment.statutoryRateApplied) {
+      alert(assignment.statutoryRateMessage || "적용 가능한 연도별 법정 요율이 없어 배치를 저장할 수 없습니다.");
+      return;
+    }
     const assignments = [...data.assignments, assignment];
     updateData({ ...data, assignments, workRequests: normalizeRequestStatuses(data.workRequests, assignments) });
     setAssignmentForm({ ...assignmentForm, workerId: "", manualEmploymentInsurance: "", manualHealthInsurance: "", manualNationalPension: "", manualLongTermCare: "", manualDeductionAmount: "", manualPaymentAmount: "", manualReason: "", memo: "" });
@@ -2183,13 +2197,20 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
         workCount: assignmentForm.workCount,
         deductionType: assignmentForm.deductionType,
         existingAssignments: baseAssignments,
-        calculationRules: data.calculationRules
+        calculationRules: data.calculationRules,
+        statutoryRatesEnabled: data.statutoryRateSettings.enabled,
+        statutoryRateTables: data.statutoryRateTables
       });
       const assignment = { ...calculated, id: createId(`as${index}`), memo: assignmentForm.memo || "일괄 배치" };
       baseAssignments = [...baseAssignments, assignment];
       return assignment;
     });
     const assignments = [...data.assignments, ...newAssignments];
+    const missingStatutoryRate = newAssignments.find((assignment) => data.statutoryRateSettings.enabled && !assignment.statutoryRateApplied);
+    if (missingStatutoryRate) {
+      alert(missingStatutoryRate.statutoryRateMessage || "적용 가능한 연도별 법정 요율이 없어 일괄 배치를 저장할 수 없습니다.");
+      return;
+    }
     updateData({ ...data, assignments, workRequests: normalizeRequestStatuses(data.workRequests, assignments) });
     setBulkAssignCount(Math.max(selectedRequest.requestedCount - currentAssigned - newAssignments.length, 1));
   };
@@ -2292,10 +2313,13 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
                 <span>근로자 기준금액 {"deductionBaseAmount" in preview ? formatWon(preview.deductionBaseAmount) : "-"}</span>
                 <span>총공제 {formatWon(preview.deductionAmount)}</span>
                 <span>차감지급 {formatWon(preview.paymentAmount)}</span>
+                <span>소득세 {formatWon("incomeTax" in preview ? preview.incomeTax : 0)}</span>
+                <span>지방소득세 {formatWon("localIncomeTax" in preview ? preview.localIncomeTax : 0)}</span>
                 <span>고용 {formatWon("employmentInsurance" in preview ? preview.employmentInsurance : 0)}</span>
                 <span>건강 {formatWon("healthInsurance" in preview ? preview.healthInsurance : 0)}</span>
                 <span>연금 {formatWon("nationalPension" in preview ? preview.nationalPension : 0)}</span>
                 <span>장기요양 {formatWon("longTermCare" in preview ? preview.longTermCare : 0)}</span>
+                <span>적용 요율연도 {"statutoryRateSourceYear" in preview && preview.statutoryRateSourceYear ? `${preview.statutoryRateSourceYear}년` : "-"}</span>
               </div>
               <div className="rounded-md border border-navy-100 bg-white p-3 text-sm text-slate-700">
                 <p><b>나이구분</b> {previewWorker ? ageGroupLabel(getAgeGroupByWorkDate(previewWorker.birthDate, selectedRequest.workDate)) : "-"}</p>
@@ -2303,6 +2327,7 @@ function AttendanceView({ data, updateData }: { data: AppData; updateData: (data
                 <p><b>공제 적용 여부</b> {preview.deductionAmount > 0 ? "적용" : "미적용"}</p>
                 <p><b>적용규칙</b> {"appliedRuleLabel" in preview ? preview.appliedRuleLabel : "-"}</p>
                 <p><b>판단사유</b> {"deductionReason" in preview ? preview.deductionReason : "계산기준표 기준 공제액을 미리 계산합니다."}</p>
+                {"statutoryRateMessage" in preview && preview.statutoryRateMessage && <p><b>법정 요율</b> {preview.statutoryRateMessage}</p>}
                 {"healthInsuranceReason" in preview && <p><b>건강보험</b> {preview.healthInsuranceReason}</p>}
                 {"pensionReason" in preview && <p><b>국민연금</b> {preview.pensionReason}</p>}
               </div>
@@ -3988,6 +4013,91 @@ function HelpView() {
 
 function RulesView({ data, updateData }: { data: AppData; updateData: (data: AppData) => void }) {
   const [form, setForm] = useState<CalculationRule>(emptyRule);
+  const [rateForm, setRateForm] = useState<StatutoryRateTable>(emptyStatutoryRate);
+  const [comparisonForm, setComparisonForm] = useState({
+    year: new Date().getFullYear(),
+    workerType: "DAILY" as StatutoryWorkerType,
+    unitPrice: 150000,
+    workCount: 1,
+    deductionType: "고용보험" as DeductionType
+  });
+  const statutoryRateTables = data.statutoryRateTables || [];
+  const yearOptions = Array.from({ length: 11 }, (_, index) => new Date().getFullYear() - 5 + index);
+  const comparisonWorker = data.workers[0];
+  const comparisonSite = data.sites[0];
+  const comparisonClient = data.clients[0];
+  const comparisonWorkDate = `${comparisonForm.year}-01-01`;
+  const comparisonBaseline = calculateByRule(comparisonForm.unitPrice, comparisonForm.workCount, comparisonForm.deductionType, data.calculationRules);
+  const comparisonStatutory =
+    comparisonWorker && comparisonSite && comparisonClient
+      ? calculatePayrollDeduction({
+          worker: comparisonWorker,
+          site: comparisonSite,
+          client: comparisonClient,
+          requestId: "statutory-test",
+          workerId: comparisonWorker.id,
+          workDate: comparisonWorkDate,
+          clientId: comparisonClient.id,
+          siteId: comparisonSite.id,
+          taskDescription: "",
+          unitPrice: comparisonForm.unitPrice,
+          workCount: comparisonForm.workCount,
+          deductionType: comparisonForm.deductionType,
+          existingAssignments: [],
+          calculationRules: data.calculationRules,
+          statutoryRatesEnabled: true,
+          statutoryRateTables,
+          workerType: comparisonForm.workerType
+        })
+      : undefined;
+  const comparisonRateLookup = getApplicableStatutoryRate(statutoryRateTables, comparisonForm.year, comparisonForm.workerType);
+
+  const setRateField = <K extends keyof StatutoryRateTable>(key: K, value: StatutoryRateTable[K]) => {
+    setRateForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const saveStatutoryRate = () => {
+    const effectiveYear = Number(rateForm.effectiveYear);
+    if (!Number.isFinite(effectiveYear) || effectiveYear <= 0) return alert("적용연도를 입력해 주세요.");
+    const duplicate = statutoryRateTables.find((item) => item.id !== rateForm.id && item.effectiveYear === effectiveYear && item.workerType === rateForm.workerType);
+    if (duplicate) return alert("같은 연도와 근로구분의 법정 요율은 중복 등록할 수 없습니다.");
+    const nextRate: StatutoryRateTable = {
+      ...rateForm,
+      id: rateForm.id || createId("sr"),
+      effectiveYear,
+      effectiveFrom: rateForm.effectiveFrom || `${effectiveYear}-01-01`
+    };
+    updateData({
+      ...data,
+      statutoryRateTables: rateForm.id
+        ? statutoryRateTables.map((item) => (item.id === nextRate.id ? nextRate : item))
+        : [...statutoryRateTables, nextRate]
+    });
+    setRateForm(createEmptyStatutoryRateTable("", effectiveYear, rateForm.workerType));
+  };
+
+  const deleteStatutoryRate = (id: string) => {
+    if (!confirm("선택한 연도별 법정 요율을 삭제할까요?")) return;
+    updateData({ ...data, statutoryRateTables: statutoryRateTables.filter((item) => item.id !== id) });
+    if (rateForm.id === id) setRateForm(emptyStatutoryRate);
+  };
+
+  const loadPreviousYearRate = () => {
+    const targetYear = Number(rateForm.effectiveYear);
+    const previous = statutoryRateTables.find((item) => item.effectiveYear === targetYear - 1 && item.workerType === rateForm.workerType);
+    if (!previous) return alert("전년도에 같은 근로구분의 요율이 없습니다.");
+    setRateForm({
+      ...previous,
+      id: "",
+      effectiveYear: targetYear,
+      effectiveFrom: `${targetYear}-01-01`,
+      note: previous.note ? `전년도 값 복사: ${previous.note}` : "전년도 값 복사"
+    });
+  };
+
+  const toggleStatutoryRates = (enabled: boolean) => {
+    updateData({ ...data, statutoryRateSettings: { ...(data.statutoryRateSettings || { enabled: false }), enabled } });
+  };
 
   const recalculateRule = (next: Partial<CalculationRule>) => {
     const unitPrice = next.unitPrice ?? form.unitPrice;
@@ -4085,6 +4195,176 @@ function RulesView({ data, updateData }: { data: AppData; updateData: (data: App
           </table>
         </DataTable>
       </Panel>
+
+      <div className="xl:col-span-2">
+        <Panel
+          title="연도별 법정 세금·보험 요율"
+          actions={
+            <label className="flex min-h-10 items-center gap-2 rounded-md border border-navy-100 bg-white px-3 text-sm font-bold text-navy-900">
+              <input type="checkbox" checked={Boolean(data.statutoryRateSettings?.enabled)} onChange={(event) => toggleStatutoryRates(event.target.checked)} />
+              연도별 법정 요율 적용
+            </label>
+          }
+        >
+          <div className="grid gap-4">
+            <div className="rounded-md bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+              실제 법정 요율 숫자는 자동으로 확정하지 않습니다. 사용자가 검토한 요율을 등록하고 스위치를 켠 뒤부터 새 계산에 적용됩니다.
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Field label="적용연도">
+                <TextInput list="statutory-year-options" type="number" value={rateForm.effectiveYear} onChange={(event) => setRateField("effectiveYear", Number(event.target.value))} />
+              </Field>
+              <datalist id="statutory-year-options">
+                {yearOptions.map((year) => <option key={year} value={year} />)}
+              </datalist>
+              <Field label="근로구분">
+                <SelectInput value={rateForm.workerType} onChange={(event) => setRateForm({ ...rateForm, workerType: event.target.value as StatutoryWorkerType, incomeTaxMode: event.target.value === "DAILY" ? "DAILY_FORMULA" : "MONTHLY_TABLE" })}>
+                  <option value="DAILY">일용근로자</option>
+                  <option value="REGULAR">일반근로자</option>
+                </SelectInput>
+              </Field>
+              <Field label="소득세 계산 방식">
+                <SelectInput value={rateForm.incomeTaxMode} onChange={(event) => setRateField("incomeTaxMode", event.target.value as IncomeTaxMode)}>
+                  <option value="DAILY_FORMULA">일용근로소득 계산식</option>
+                  <option value="MONTHLY_TABLE">근로소득 간이세액표</option>
+                </SelectInput>
+              </Field>
+              <Field label="반올림/절사 방식">
+                <SelectInput value={rateForm.roundingRule} onChange={(event) => setRateField("roundingRule", event.target.value as StatutoryRoundingRule)}>
+                  <option value="FLOOR_1">1원 절사</option>
+                  <option value="FLOOR_10">10원 절사</option>
+                  <option value="ROUND">반올림</option>
+                </SelectInput>
+              </Field>
+              <Field label="일용근로소득공제액"><TextInput type="number" value={rateForm.dailyIncomeDeductionAmount} onChange={(event) => setRateField("dailyIncomeDeductionAmount", Number(event.target.value))} /></Field>
+              <Field label="소득세율"><TextInput type="number" step="0.0001" value={rateForm.dailyIncomeTaxRate} onChange={(event) => setRateField("dailyIncomeTaxRate", Number(event.target.value))} /></Field>
+              <Field label="근로소득세액공제율"><TextInput type="number" step="0.0001" value={rateForm.dailyIncomeTaxCreditRate} onChange={(event) => setRateField("dailyIncomeTaxCreditRate", Number(event.target.value))} /></Field>
+              <Field label="소액부징수 기준"><TextInput type="number" value={rateForm.minimumCollectionTaxAmount} onChange={(event) => setRateField("minimumCollectionTaxAmount", Number(event.target.value))} /></Field>
+              <Field label="지방소득세율"><TextInput type="number" step="0.0001" value={rateForm.localIncomeTaxRate} onChange={(event) => setRateField("localIncomeTaxRate", Number(event.target.value))} /></Field>
+              <Field label="고용보험 근로자 부담률"><TextInput type="number" step="0.0001" value={rateForm.employmentInsuranceEmployeeRate} onChange={(event) => setRateField("employmentInsuranceEmployeeRate", Number(event.target.value))} /></Field>
+              <Field label="건강보험 근로자 부담률"><TextInput type="number" step="0.0001" value={rateForm.healthInsuranceEmployeeRate} onChange={(event) => setRateField("healthInsuranceEmployeeRate", Number(event.target.value))} /></Field>
+              <Field label="국민연금 근로자 부담률"><TextInput type="number" step="0.0001" value={rateForm.nationalPensionEmployeeRate} onChange={(event) => setRateField("nationalPensionEmployeeRate", Number(event.target.value))} /></Field>
+              <Field label="장기요양보험률"><TextInput type="number" step="0.0001" value={rateForm.longTermCareRate} onChange={(event) => setRateField("longTermCareRate", Number(event.target.value))} /></Field>
+              <Field label="고용보험 계산 기준">
+                <SelectInput value={rateForm.employmentInsuranceBasis} onChange={(event) => setRateField("employmentInsuranceBasis", event.target.value as InsuranceCalculationBasis)}>
+                  <option value="DAILY_WAGE">일 단가 기준</option>
+                  <option value="MONTHLY_TOTAL">월 보수총액 기준</option>
+                  <option value="STANDARD_MONTHLY_INCOME">기준소득월액 기준</option>
+                </SelectInput>
+              </Field>
+              <Field label="건강보험 계산 기준">
+                <SelectInput value={rateForm.healthInsuranceBasis} onChange={(event) => setRateField("healthInsuranceBasis", event.target.value as InsuranceCalculationBasis)}>
+                  <option value="DAILY_WAGE">일 단가 기준</option>
+                  <option value="MONTHLY_TOTAL">월 보수총액 기준</option>
+                  <option value="STANDARD_MONTHLY_INCOME">기준소득월액 기준</option>
+                </SelectInput>
+              </Field>
+              <Field label="국민연금 계산 기준">
+                <SelectInput value={rateForm.nationalPensionBasis} onChange={(event) => setRateField("nationalPensionBasis", event.target.value as InsuranceCalculationBasis)}>
+                  <option value="DAILY_WAGE">일 단가 기준</option>
+                  <option value="MONTHLY_TOTAL">월 보수총액 기준</option>
+                  <option value="STANDARD_MONTHLY_INCOME">기준소득월액 기준</option>
+                </SelectInput>
+              </Field>
+              <Field label="적용 시작일"><TextInput type="date" value={rateForm.effectiveFrom} onChange={(event) => setRateField("effectiveFrom", event.target.value)} /></Field>
+              <div className="md:col-span-2 xl:col-span-4"><Field label="비고"><TextInput value={rateForm.note} onChange={(event) => setRateField("note", event.target.value)} /></Field></div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={saveStatutoryRate}>{rateForm.id ? "수정" : "저장"}</Button>
+              <Button variant="secondary" onClick={loadPreviousYearRate}>전년도 값 불러오기</Button>
+              <Button variant="secondary" onClick={() => setRateForm(createEmptyStatutoryRateTable("", new Date().getFullYear(), "DAILY"))}>초기화</Button>
+              <Button variant="danger" onClick={() => rateForm.id && deleteStatutoryRate(rateForm.id)} disabled={!rateForm.id}>삭제</Button>
+            </div>
+            <DataTable>
+              <table className="w-full border-collapse">
+                <thead><tr>{["적용연도", "근로구분", "소득세 방식", "소득공제", "소득세율", "세액공제율", "소액부징수", "지방세율", "고용", "건강", "연금", "장기", "계산기준", "반올림", "적용 시작일", "비고", "관리"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+                <tbody>
+                  {[...statutoryRateTables].sort((a, b) => b.effectiveYear - a.effectiveYear || a.workerType.localeCompare(b.workerType)).map((rate) => (
+                    <tr key={rate.id}>
+                      <td className={td}>{rate.effectiveYear}</td>
+                      <td className={td}>{statutoryWorkerTypeLabel(rate.workerType)}</td>
+                      <td className={td}>{incomeTaxModeLabel(rate.incomeTaxMode)}</td>
+                      <td className={td}>{formatWon(rate.dailyIncomeDeductionAmount)}</td>
+                      <td className={td}>{formatRatePercent(rate.dailyIncomeTaxRate)}</td>
+                      <td className={td}>{formatRatePercent(rate.dailyIncomeTaxCreditRate)}</td>
+                      <td className={td}>{formatWon(rate.minimumCollectionTaxAmount)}</td>
+                      <td className={td}>{formatRatePercent(rate.localIncomeTaxRate)}</td>
+                      <td className={td}>{formatRatePercent(rate.employmentInsuranceEmployeeRate)}</td>
+                      <td className={td}>{formatRatePercent(rate.healthInsuranceEmployeeRate)}</td>
+                      <td className={td}>{formatRatePercent(rate.nationalPensionEmployeeRate)}</td>
+                      <td className={td}>{formatRatePercent(rate.longTermCareRate)}</td>
+                      <td className={td}>{insuranceBasisLabel(rate.employmentInsuranceBasis)} / {insuranceBasisLabel(rate.healthInsuranceBasis)} / {insuranceBasisLabel(rate.nationalPensionBasis)}</td>
+                      <td className={td}>{roundingRuleLabel(rate.roundingRule)}</td>
+                      <td className={td}>{rate.effectiveFrom}</td>
+                      <td className={td}>{rate.note}</td>
+                      <td className={`${td} space-x-2`}><Button variant="secondary" onClick={() => setRateForm(rate)}>수정</Button><Button variant="danger" onClick={() => deleteStatutoryRate(rate.id)}>삭제</Button></td>
+                    </tr>
+                  ))}
+                  {statutoryRateTables.length === 0 && <tr><td className={td} colSpan={17}>등록된 연도별 법정 요율이 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </DataTable>
+          </div>
+        </Panel>
+      </div>
+
+      <div className="xl:col-span-2">
+        <Panel title="기존 계산 결과 vs 연도별 요율 적용 결과">
+          <div className="grid gap-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <Field label="테스트 연도"><TextInput list="statutory-year-options" type="number" value={comparisonForm.year} onChange={(event) => setComparisonForm({ ...comparisonForm, year: Number(event.target.value) })} /></Field>
+              <Field label="근로구분">
+                <SelectInput value={comparisonForm.workerType} onChange={(event) => setComparisonForm({ ...comparisonForm, workerType: event.target.value as StatutoryWorkerType })}>
+                  <option value="DAILY">일용근로자</option>
+                  <option value="REGULAR">일반근로자</option>
+                </SelectInput>
+              </Field>
+              <Field label="단가"><TextInput type="number" value={comparisonForm.unitPrice} onChange={(event) => setComparisonForm({ ...comparisonForm, unitPrice: Number(event.target.value) })} /></Field>
+              <Field label="공수"><TextInput type="number" step="0.5" value={comparisonForm.workCount} onChange={(event) => setComparisonForm({ ...comparisonForm, workCount: Number(event.target.value) })} /></Field>
+              <Field label="공제유형"><DeductionSelect value={comparisonForm.deductionType} onChange={(value) => setComparisonForm({ ...comparisonForm, deductionType: value })} /></Field>
+            </div>
+            <div className="rounded-md bg-navy-50 p-3 text-sm font-semibold text-navy-900">
+              {comparisonRateLookup.message}
+            </div>
+            <DataTable>
+              <table className="w-full border-collapse">
+                <thead><tr>{["구분", "소득세", "지방소득세", "고용보험", "건강보험", "국민연금", "장기요양", "총공제액", "최종 지급액", "적용 요율연도"].map((header) => <th key={header} className={th}>{header}</th>)}</tr></thead>
+                <tbody>
+                  <tr>
+                    <td className={td}>기존 계산기준</td>
+                    <td className={td}>{formatWon(0)}</td>
+                    <td className={td}>{formatWon(0)}</td>
+                    <td className={td}>{formatWon(comparisonBaseline.employmentInsurance)}</td>
+                    <td className={td}>{formatWon(comparisonBaseline.healthInsurance)}</td>
+                    <td className={td}>{formatWon(comparisonBaseline.nationalPension)}</td>
+                    <td className={td}>{formatWon(comparisonBaseline.longTermCare)}</td>
+                    <td className={td}>{formatWon(comparisonBaseline.deductionAmount)}</td>
+                    <td className={td}>{formatWon(comparisonBaseline.paymentAmount)}</td>
+                    <td className={td}>-</td>
+                  </tr>
+                  <tr>
+                    <td className={td}>연도별 요율 적용</td>
+                    <td className={td}>{formatWon(comparisonStatutory?.incomeTax ?? 0)}</td>
+                    <td className={td}>{formatWon(comparisonStatutory?.localIncomeTax ?? 0)}</td>
+                    <td className={td}>{formatWon(comparisonStatutory?.employmentInsurance ?? 0)}</td>
+                    <td className={td}>{formatWon(comparisonStatutory?.healthInsurance ?? 0)}</td>
+                    <td className={td}>{formatWon(comparisonStatutory?.nationalPension ?? 0)}</td>
+                    <td className={td}>{formatWon(comparisonStatutory?.longTermCare ?? 0)}</td>
+                    <td className={td}>{formatWon(comparisonStatutory?.deductionAmount ?? 0)}</td>
+                    <td className={td}>{formatWon(comparisonStatutory?.paymentAmount ?? comparisonBaseline.laborCost)}</td>
+                    <td className={td}>{comparisonStatutory?.statutoryRateSourceYear ? `${comparisonStatutory.statutoryRateSourceYear}년` : "-"}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </DataTable>
+            {!comparisonWorker || !comparisonSite || !comparisonClient ? (
+              <p className="text-sm text-slate-500">비교 계산은 근로자, 거래처, 현장 데이터가 있을 때 더 정확하게 표시됩니다.</p>
+            ) : (
+              <p className="text-sm text-slate-600">비교 영역은 화면 테스트용이며 요청, 배치, localStorage, current.json에는 저장하지 않습니다.</p>
+            )}
+          </div>
+        </Panel>
+      </div>
     </div>
   );
 }
@@ -4148,6 +4428,8 @@ function getDisplayAssignment(assignment: WorkAssignment, data: AppData) {
       deductionType: assignment.deductionType,
       existingAssignments: data.assignments.filter((item) => item.id !== assignment.id),
       calculationRules: data.calculationRules,
+      statutoryRatesEnabled: data.statutoryRateSettings.enabled,
+      statutoryRateTables: data.statutoryRateTables,
       manual: assignment.isManualDeduction
         ? {
             employmentInsurance: assignment.manualEmploymentInsurance ?? assignment.employmentInsurance,
@@ -4165,7 +4447,9 @@ function getDisplayAssignment(assignment: WorkAssignment, data: AppData) {
   const healthInsurance = calculated.healthInsurance || 0;
   const nationalPension = calculated.nationalPension || 0;
   const longTermCare = calculated.longTermCare || 0;
-  const deductionAmount = calculated.deductionAmount ?? employmentInsurance + healthInsurance + nationalPension + longTermCare;
+  const incomeTax = calculated.incomeTax || 0;
+  const localIncomeTax = calculated.localIncomeTax || 0;
+  const deductionAmount = calculated.deductionAmount ?? employmentInsurance + healthInsurance + nationalPension + longTermCare + incomeTax + localIncomeTax;
   const laborCost = calculated.laborCost || Math.round((calculated.deductionBaseAmount || assignment.unitPrice) * assignment.workCount);
   return {
     ...assignment,
@@ -4177,10 +4461,18 @@ function getDisplayAssignment(assignment: WorkAssignment, data: AppData) {
     healthInsurance,
     nationalPension,
     longTermCare,
+    incomeTax,
+    localIncomeTax,
     deductionAmount,
     paymentAmount: calculated.paymentAmount ?? laborCost - deductionAmount,
     appliedRuleLabel: calculated.appliedRuleLabel || assignment.appliedRuleLabel,
     deductionReason: calculated.deductionReason || assignment.deductionReason,
+    statutoryRateApplied: calculated.statutoryRateApplied ?? assignment.statutoryRateApplied,
+    statutoryRateYear: calculated.statutoryRateYear ?? assignment.statutoryRateYear,
+    statutoryRateSourceYear: calculated.statutoryRateSourceYear ?? assignment.statutoryRateSourceYear,
+    statutoryRateMessage: calculated.statutoryRateMessage || assignment.statutoryRateMessage,
+    incomeTaxMode: calculated.incomeTaxMode || assignment.incomeTaxMode,
+    workerType: calculated.workerType || assignment.workerType,
     laborCost
   };
 }
@@ -4190,7 +4482,7 @@ function AssignmentTable({ assignments, data, actions }: { assignments: WorkAssi
       <table className="w-full border-collapse">
         <thead>
           <tr>
-            {["근무일", "거래처", "현장", "근로자", "작업내용", "실제단가", "공수", "노무비", "고용", "건강", "연금", "장기", "총공제", "지급액", "적용규칙", "판단사유"].map((header) => (
+            {["근무일", "거래처", "현장", "근로자", "작업내용", "실제단가", "공수", "노무비", "소득세", "지방소득세", "고용보험", "건강보험", "국민연금", "장기요양", "총공제액", "최종 지급액", "적용 요율연도", "적용규칙", "판단사유"].map((header) => (
               <th key={header} className={th}>{header}</th>
             ))}
             {actions && <th className={th}>관리</th>}
@@ -4209,12 +4501,15 @@ function AssignmentTable({ assignments, data, actions }: { assignments: WorkAssi
                 <td className={td}>{formatWon(display.unitPrice)}</td>
                 <td className={td}>{display.workCount}</td>
                 <td className={td}>{formatWon(display.laborCost)}</td>
+                <td className={td}>{formatWon(display.incomeTax)}</td>
+                <td className={td}>{formatWon(display.localIncomeTax)}</td>
                 <td className={td}>{formatWon(display.employmentInsurance)}</td>
                 <td className={td}>{formatWon(display.healthInsurance)}</td>
                 <td className={td}>{formatWon(display.nationalPension)}</td>
                 <td className={td}>{formatWon(display.longTermCare)}</td>
                 <td className={td}>{formatWon(display.deductionAmount)}</td>
                 <td className={td}>{formatWon(display.paymentAmount)}</td>
+                <td className={td}>{display.statutoryRateSourceYear ? `${display.statutoryRateSourceYear}년` : "-"}</td>
                 <td className={`${td} min-w-36 font-semibold text-navy-900`}>{display.appliedRuleLabel}</td>
                 <td className={`${td} min-w-72 text-xs leading-relaxed text-slate-600`}>{display.deductionReason}</td>
                 {actions && <td className={td}>{actions(assignment)}</td>}

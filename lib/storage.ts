@@ -1,6 +1,6 @@
 "use client";
 
-import { AppData, CalculationRule, Client, Site, WorkAssignment, WorkEntry, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "./types";
+import { AppData, CalculationRule, Client, Site, StatutoryRateTable, WorkAssignment, WorkEntry, WorkRequest, Worker, WorkerAttachment, WorkerDocumentKind } from "./types";
 import { SCHEMA_VERSION, sampleData } from "./sample-data";
 import { ceilWon, getWorkerBaseAmount, normalizeRequestStatuses } from "./calculations";
 import { calculatePayrollDeduction } from "./payrollRules";
@@ -19,6 +19,8 @@ export const productionData: AppData = {
   workRequests: [],
   assignments: [],
   calculationRules: sampleData.calculationRules,
+  statutoryRateSettings: { enabled: false },
+  statutoryRateTables: [],
   companyInfo: {
     ...sampleData.companyInfo,
     companyName: "",
@@ -258,6 +260,38 @@ function migrateRule(rule: Partial<CalculationRule>): CalculationRule {
     memo: rule.memo || ""
   };
 }
+
+function migrateStatutoryRateTable(table: Partial<StatutoryRateTable>): StatutoryRateTable {
+  const effectiveYear = Number(table.effectiveYear) || new Date().getFullYear();
+  return {
+    id: table.id || createId("sr"),
+    effectiveYear,
+    workerType: table.workerType || "DAILY",
+    incomeTaxMode: table.incomeTaxMode || (table.workerType === "REGULAR" ? "MONTHLY_TABLE" : "DAILY_FORMULA"),
+    dailyIncomeDeductionAmount: Number(table.dailyIncomeDeductionAmount) || 0,
+    dailyIncomeTaxRate: Number(table.dailyIncomeTaxRate) || 0,
+    dailyIncomeTaxCreditRate: Number(table.dailyIncomeTaxCreditRate) || 0,
+    minimumCollectionTaxAmount: Number(table.minimumCollectionTaxAmount) || 0,
+    localIncomeTaxRate: Number(table.localIncomeTaxRate) || 0,
+    employmentInsuranceEmployeeRate: Number(table.employmentInsuranceEmployeeRate) || 0,
+    healthInsuranceEmployeeRate: Number(table.healthInsuranceEmployeeRate) || 0,
+    nationalPensionEmployeeRate: Number(table.nationalPensionEmployeeRate) || 0,
+    longTermCareRate: Number(table.longTermCareRate) || 0,
+    employmentInsuranceBasis: table.employmentInsuranceBasis || "DAILY_WAGE",
+    healthInsuranceBasis: table.healthInsuranceBasis || "MONTHLY_TOTAL",
+    nationalPensionBasis: table.nationalPensionBasis || "STANDARD_MONTHLY_INCOME",
+    roundingRule: table.roundingRule || "FLOOR_10",
+    effectiveFrom: table.effectiveFrom || `${effectiveYear}-01-01`,
+    note: table.note || ""
+  };
+}
+
+function migrateStatutoryRateSettings(settings: Partial<AppData["statutoryRateSettings"]> | undefined): AppData["statutoryRateSettings"] {
+  return {
+    enabled: Boolean(settings?.enabled)
+  };
+}
+
 function convertEntriesToRequestsAndAssignments(data: AppData, entries: WorkEntry[]) {
   const requests: WorkRequest[] = [];
   const assignments: WorkAssignment[] = [];
@@ -356,6 +390,8 @@ export function migrateAppData(partial: Partial<AppData>): AppData {
     workRequests: partial.workRequests ?? [],
     assignments: partial.assignments ?? [],
     calculationRules,
+    statutoryRateSettings: migrateStatutoryRateSettings(partial.statutoryRateSettings),
+    statutoryRateTables: (partial.statutoryRateTables ?? []).map(migrateStatutoryRateTable),
     companyInfo: migrateCompanyInfo(partial.companyInfo),
     accessControl: migrateAccessControl(partial.accessControl),
     cloudSync: migrateCloudSync(partial.cloudSync),
@@ -377,7 +413,9 @@ export function migrateAppData(partial: Partial<AppData>): AppData {
     employmentInsurance: assignment.employmentInsurance ?? 0,
     healthInsurance: assignment.healthInsurance ?? 0,
     nationalPension: assignment.nationalPension ?? 0,
-    longTermCare: assignment.longTermCare ?? 0
+    longTermCare: assignment.longTermCare ?? 0,
+    incomeTax: assignment.incomeTax ?? 0,
+    localIncomeTax: assignment.localIncomeTax ?? 0
   }));
   return data;
 }

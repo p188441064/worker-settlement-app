@@ -178,6 +178,10 @@ export const sampleData: AppData = {
   workRequests: normalizeRequestStatuses(sampleWorkRequests, sampleAssignments),
   assignments: sampleAssignments,
   calculationRules: sampleCalculationRules,
+  statutoryRateSettings: {
+    enabled: false
+  },
+  statutoryRateTables: [],
   companyInfo: {
     companyName: "주식회사 샘플인력",
     companyAddress: "서울시 샘플구 샘플로 00",

@@ -20,6 +20,10 @@ export type FirstMonthInsuranceHandling = "APPLY" | "NOT_APPLY" | "MANUAL";
 export type PensionThresholdBase = "LABOR_COST_TOTAL";
 export type RequestStatus = "배치대기" | "일부배치" | "배치완료" | "초과배치" | "취소";
 export type AssignmentStatus = "배치완료" | "대기" | "취소";
+export type StatutoryWorkerType = "DAILY" | "REGULAR";
+export type IncomeTaxMode = "DAILY_FORMULA" | "MONTHLY_TABLE";
+export type StatutoryRoundingRule = "FLOOR_1" | "FLOOR_10" | "ROUND";
+export type InsuranceCalculationBasis = "DAILY_WAGE" | "MONTHLY_TOTAL" | "STANDARD_MONTHLY_INCOME";
 
 export interface WorkerAttachment {
   id: string;
@@ -153,6 +157,8 @@ export interface WorkAssignment {
   healthInsurance: number;
   nationalPension: number;
   longTermCare: number;
+  incomeTax: number;
+  localIncomeTax: number;
   deductionAmount: number;
   paymentAmount: number;
   status: AssignmentStatus;
@@ -188,6 +194,12 @@ export interface WorkAssignment {
   manualDeductionAmount?: number;
   manualPaymentAmount?: number;
   manualReason?: string;
+  statutoryRateApplied?: boolean;
+  statutoryRateYear?: number;
+  statutoryRateSourceYear?: number;
+  statutoryRateMessage?: string;
+  incomeTaxMode?: IncomeTaxMode;
+  workerType?: StatutoryWorkerType;
 }
 
 export interface WorkEntry {
@@ -222,6 +234,32 @@ export interface CalculationRule {
   deductionAmount: number;
   paymentAmount: number;
   memo: string;
+}
+
+export interface StatutoryRateSettings {
+  enabled: boolean;
+}
+
+export interface StatutoryRateTable {
+  id: string;
+  effectiveYear: number;
+  workerType: StatutoryWorkerType;
+  incomeTaxMode: IncomeTaxMode;
+  dailyIncomeDeductionAmount: number;
+  dailyIncomeTaxRate: number;
+  dailyIncomeTaxCreditRate: number;
+  minimumCollectionTaxAmount: number;
+  localIncomeTaxRate: number;
+  employmentInsuranceEmployeeRate: number;
+  healthInsuranceEmployeeRate: number;
+  nationalPensionEmployeeRate: number;
+  longTermCareRate: number;
+  employmentInsuranceBasis: InsuranceCalculationBasis;
+  healthInsuranceBasis: InsuranceCalculationBasis;
+  nationalPensionBasis: InsuranceCalculationBasis;
+  roundingRule: StatutoryRoundingRule;
+  effectiveFrom: string;
+  note: string;
 }
 
 export type UserRole = "ADMIN" | "USER";
@@ -295,6 +333,8 @@ export interface AppData {
   workRequests: WorkRequest[];
   assignments: WorkAssignment[];
   calculationRules: CalculationRule[];
+  statutoryRateSettings: StatutoryRateSettings;
+  statutoryRateTables: StatutoryRateTable[];
   companyInfo: CompanyInfo;
   accessControl: AccessControl;
   cloudSync: CloudSyncConfig;

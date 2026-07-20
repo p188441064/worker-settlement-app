@@ -4,9 +4,12 @@ import {
   Site,
   WorkAssignment,
   Worker,
-  DeductionType
+  DeductionType,
+  StatutoryRateTable,
+  StatutoryWorkerType
 } from "./types";
 import { ceilWon, findCalculationRule, floorWon, getAgeGroupByWorkDate, getWorkerBaseAmount, isSameMonth } from "./calculations";
+import { calculateStatutoryDeductions, resolveStatutoryWorkerType } from "./statutory-rates";
 
 export interface ManualDeductionInput {
   employmentInsurance?: number;
@@ -33,6 +36,9 @@ export interface PayrollDeductionInput {
   deductionType: DeductionType;
   existingAssignments: WorkAssignment[];
   calculationRules: CalculationRule[];
+  statutoryRatesEnabled?: boolean;
+  statutoryRateTables?: StatutoryRateTable[];
+  workerType?: StatutoryWorkerType;
   manual?: ManualDeductionInput;
 }
 
@@ -89,6 +95,9 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
     deductionType,
     existingAssignments,
     calculationRules,
+    statutoryRatesEnabled = false,
+    statutoryRateTables = [],
+    workerType,
     manual
   } = input;
   const ageGroup = getAgeGroupByWorkDate(worker.birthDate, workDate);
@@ -156,7 +165,7 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
           ? `노무비 총액 ${pensionThresholdLaborCost.toLocaleString("ko-KR")}원이 기준금액 ${site.pensionMonthlyThreshold.toLocaleString("ko-KR")}원 이상으로 국민연금 적용 판단`
           : `노무비 총액 ${pensionThresholdLaborCost.toLocaleString("ko-KR")}원이 기준금액 ${site.pensionMonthlyThreshold.toLocaleString("ko-KR")}원 미만으로 국민연금 미적용`;
 
-  const longTermCare = healthInsuranceApplied ? floorWon((rule?.longTermCare ?? 0) * workCount) : 0;
+  let longTermCare = healthInsuranceApplied ? floorWon((rule?.longTermCare ?? 0) * workCount) : 0;
 
   if (clientBasedWorkDays <= 7) {
     healthInsuranceApplied = false;
@@ -165,6 +174,37 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
     nationalPension = 0;
     healthInsuranceReason = `거래처 기준 누적근무일수 ${clientBasedWorkDays}일로 7일 이하 고용보험만 적용`;
     pensionReason = `거래처 기준 누적근무일수 ${clientBasedWorkDays}일로 국민연금 미적용`;
+  }
+
+  const statutoryWorkerType = workerType || resolveStatutoryWorkerType(worker);
+  const statutoryResult = statutoryRatesEnabled
+    ? calculateStatutoryDeductions({
+        rateTables: statutoryRateTables,
+        workDate,
+        workerType: statutoryWorkerType,
+        deductionType,
+        deductionBaseAmount,
+        laborCost,
+        workCount,
+        monthlyEmploymentBase: monthlyClientLaborCost,
+        monthlyHealthBase: site.healthInsuranceBasis === "SITE_BASED" ? monthlySiteLaborCost : monthlyClientLaborCost,
+        monthlyPensionBase: pensionThresholdLaborCost,
+        standardMonthlyBase: site.pensionMonthlyThreshold,
+        priorAssignments: monthAssignments,
+        healthInsuranceApplied,
+        pensionApplied
+      })
+    : undefined;
+
+  let incomeTax = 0;
+  let localIncomeTax = 0;
+  if (statutoryResult?.applied) {
+    employmentInsurance = statutoryResult.employmentInsurance;
+    healthInsurance = statutoryResult.healthInsurance;
+    nationalPension = statutoryResult.nationalPension;
+    longTermCare = statutoryResult.longTermCare;
+    incomeTax = statutoryResult.incomeTax;
+    localIncomeTax = statutoryResult.localIncomeTax;
   }
 
   const isManualDeduction = Boolean(
@@ -182,11 +222,15 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
   const deductionAmount =
     isManualDeduction && manual?.deductionAmount !== undefined
       ? ceilWon(manual.deductionAmount)
-      : employmentInsurance + healthInsurance + nationalPension + finalLongTermCare;
+      : employmentInsurance + healthInsurance + nationalPension + finalLongTermCare + incomeTax + localIncomeTax;
   const paymentAmount =
     isManualDeduction && manual?.paymentAmount !== undefined ? manual.paymentAmount : laborCost - deductionAmount;
   const { start, end } = dateMonthRange(workDate);
-  const ruleMissingReason = rule
+  const ruleMissingReason = statutoryResult?.applied
+    ? `연도별 법정 요율 ${statutoryResult.sourceYear}년 기준을 적용했습니다. ${statutoryResult.basisSummary}`
+    : statutoryRatesEnabled && statutoryResult
+      ? statutoryResult.message
+      : rule
     ? `${deductionBaseAmount.toLocaleString("ko-KR")}원 계산기준표를 적용했습니다.`
     : "공제기준금액에 해당하는 계산기준이 없습니다. 직접 입력해 주세요.";
 
@@ -209,14 +253,16 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
     healthInsurance,
     nationalPension,
     longTermCare: finalLongTermCare,
+    incomeTax,
+    localIncomeTax,
     deductionAmount,
     paymentAmount,
     status: "배치완료",
     memo: "",
-    appliedRuleLabel: isManualDeduction ? "수동 수정" : clientBasedWorkDays <= 7 ? "7일 이하 고용보험만 적용" : rule ? deductionType : "계산기준 없음",
+    appliedRuleLabel: isManualDeduction ? "수동 수정" : statutoryResult?.applied ? "연도별 법정 요율" : clientBasedWorkDays <= 7 ? "7일 이하 고용보험만 적용" : rule ? deductionType : "계산기준 없음",
     deductionReason: isManualDeduction
       ? `사용자가 공제금액을 직접 수정했습니다. ${manual?.manualReason ?? ""}`
-      : `${invoiceReason} ${ruleMissingReason}`,
+      : `${invoiceReason} ${ruleMissingReason}${statutoryResult?.message ? ` ${statutoryResult.message}` : ""}`,
     healthInsuranceApplied,
     healthInsuranceReason,
     healthInsurancePeriodStart: site.healthInsuranceOutputBasis === "DATE_BASED" ? workDate : start,
@@ -245,6 +291,12 @@ export function calculatePayrollDeduction(input: PayrollDeductionInput): WorkAss
     manualLongTermCare: manual?.longTermCare,
     manualDeductionAmount: manual?.deductionAmount,
     manualPaymentAmount: manual?.paymentAmount,
-    manualReason: manual?.manualReason
+    manualReason: manual?.manualReason,
+    statutoryRateApplied: Boolean(statutoryResult?.applied),
+    statutoryRateYear: statutoryResult?.requestedYear,
+    statutoryRateSourceYear: statutoryResult?.sourceYear,
+    statutoryRateMessage: statutoryResult?.message,
+    incomeTaxMode: statutoryResult?.incomeTaxMode,
+    workerType: statutoryWorkerType
   };
 }
